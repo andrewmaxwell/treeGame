@@ -2,6 +2,11 @@
   "name": "tree-game",
   "version": "0.0.1",
   "private": true,
+  "homepage": "https://tree-game-mauve.vercel.app/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/andrewmaxwell/treeGame.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -212,14 +212,21 @@ Same formula and caps as water. Flows only among tree, leaf, flower, and fruit c
 ### Metabolic consumption per tick
 | Type | Water | Energy |
 |------|-------|--------|
-| Tree | 0.05 | 0.03 |
+| Tree | 0.05 | 0.015 |
 | Leaf | 0.10 (transpiration) | 0.02 |
 | Flower | 0.15 | 0.10 |
 | Fruit | 0.20 | 0.05 |
 | Deadwood | 0 | 0 |
 
 Heat wave: leaf and fruit water consumption × 1.8.
-Winter: all consumption × 0.5 (dormancy), but photosynthesis is near zero too.
+Winter: all consumption × 0.35 (dormancy), but photosynthesis is near zero too.
+
+**M6 balance note**: tree (wood) energy upkeep was lowered from 0.03 to **0.015**, and
+winter dormancy deepened from ×0.5 to **×0.35**. At 0.03/×0.5 a small deciduous tree
+could not bank enough over summer to survive the fall+winter valley *and* re-leaf in
+spring — it collapsed to a permanent 0-energy "zombie" (alive but unable to ever
+afford a leaf again). Lower wood upkeep means structure is cheap to maintain and a
+healthy canopy yields a growing surplus year over year (guarded by `recovery.test.ts`).
 
 ### Health update
 Each tick, a cell's health moves toward a target at rate 0.01/tick:
@@ -255,10 +262,12 @@ the whole run. The seed spawns at the center surface.
 
 ### Soil moisture
 - Each soil cell holds 0–20 units of water
-- Rain events deposit water into the top 3–4 soil rows
+- Rain events deposit water into the top 3–4 soil rows (M6: **0.3 units/tick to the
+  top 4 rows** on each rain tick — see `RAIN_DEPOSIT` in `simulate.ts`)
 - Moisture diffuses (the standard water diffusion above) — downward percolation is
   emergent from rain landing on top; add a slight downward bias (+0.02) if needed
 - Evaporation from the top 2 soil rows: 0.05/tick in summer, 0.01/tick otherwise
+  (×1.5 during a drought)
 - **Water table**: soil cells at depth ≥ 18 regenerate 0.1 water/tick passively.
   Deep roots are always rewarded — this is the payoff for navigating the rocks.
 - Starting soil moisture: ~8 units average, slightly higher near the spawn point
@@ -316,10 +325,17 @@ Define support explicitly:
 
 ### Frost and the deciduous cycle (core mechanic)
 - **At winter onset (first tick of winter), every leaf cell on the tree dies and
-  drops** (removed from map). The energy invested in them is wasted.
-- **Shedding leaves during fall planning refunds 0.5 energy per leaf** (nutrient
-  resorption — exactly what real deciduous trees do). The fall ritual of harvesting
-  your own canopy back is a deliberate, satisfying part of the annual rhythm.
+  drops** (removed from map). A leaf you never shed still resorbs **30% of its stored
+  energy** back into the adjacent tree cells (`LEAF_FROST_RESORB`); the rest is wasted.
+- **Shedding leaves during fall planning resorbs 75% of each leaf's stored energy**
+  back into the tree (`LEAF_SHED_RESORB`, nutrient resorption — what real deciduous
+  trees do). Resorption is **proportional to the leaf's actual energy**, not a flat
+  amount — this makes the canopy a genuinely *recoverable* energy store, so a tree can
+  re-leaf in spring instead of starving. (Originally a flat 0.5/leaf, which destroyed
+  most banked energy and caused the death spiral above.) NOTE: because a fall-shed
+  resolves before the fall simulation, shedding forfeits that season's photosynthesis
+  — keeping leaves through fall (winter then drops them at 30%) is a valid alternative.
+  A future refinement could resolve shed at *end* of the fall sim so you get both.
 - **Spring frost** (possible in early years' forecasts, more common later): kills all
   cells placed in the immediately preceding planning phase. The forecast warns of
   frost risk; planting early in a frost-risk spring is a gamble.
@@ -332,6 +348,19 @@ Define support explicitly:
 - **Two seasons out**: vague trend ("warming", "unsettled")
 - Beyond: unknown. Droughts and severe storms always appear in the next-season
   forecast — surprise catastrophes are frustrating; forecasted ones are gameplay.
+
+**Implementation (M6)**: weather is fully deterministic from a per-run `worldSeed`
+(stored on `GameState`, stable for the whole run) mixed with `(year, season)` —
+see `sim/weather.ts` `generateWeather()`. Because the forecast simply calls the same
+function for upcoming seasons, the forecast is guaranteed to match what is later
+simulated, and reloading never rerolls the future. The simulation's stochastic RNG
+(`rngSeed`) is independent of weather generation. The season being simulated is the
+one the player *planned* (the pre-advance season), carried into `simulateSeason` via
+the `SeasonWeather` object — `applySeasonAdvance` rolls the displayed label forward,
+but the sim reads season behaviour from the weather, not the label. Drought chance
+from Year 4 is **0.18** (never in winter). Spring frost is forecast-modelled (winter
+always reads "frost risk") but its cell-kill is deferred past M6; winter-onset leaf
+kill and winter-growth (age-0) frost death are implemented.
 
 ### Difficulty curve
 - **Year 1**: gentle. Good rain, no storms, no rot, no pests. Winter 1 still requires

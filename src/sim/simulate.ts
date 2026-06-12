@@ -1,9 +1,10 @@
 import type { Cell, CellType } from './cells'
-import { CELL_WATER_CAP, CELL_ENERGY_CAP, SOIL_WATER_CAP } from './cells'
+import { CELL_WATER_CAP, CELL_ENERGY_CAP, SOIL_WATER_CAP, LEAF_FROST_RESORB } from './cells'
 import { hexKey, HEX_NEIGHBORS } from './grid'
 import { surfaceR } from './terrain'
 import type { RNG } from './rng'
 import { mulberry32 } from './rng'
+import type { SeasonWeather } from './weather'
 import type { GameState } from '../game/state'
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -108,9 +109,13 @@ function buildWork(state: GameState): Map<string, Cell> {
 
 // ─── tick steps ───────────────────────────────────────────────────────────────
 
-// Season light parameters. TODO: pass from season state (M6). Summer values now.
-const SUN_ANGLE_DEG = 5
-const LIGHT_INTENSITY = 1.0
+// Cloud cover during a rain event dims all incoming light to 40% (CLAUDE.md).
+const CLOUD_LIGHT_MULT = 0.4
+// Dormant winter metabolism: all consumption is heavily throttled so the bare,
+// leafless tree can coast on reserves until spring.
+const WINTER_METAB_MULT = 0.35
+// Water a rain event deposits per tick into each of the top soil rows.
+const RAIN_DEPOSIT = 0.3
 
 const LIGHT_TYPES: ReadonlySet<CellType> = new Set<CellType>(['tree', 'leaf', 'flower', 'fruit'])
 
@@ -177,13 +182,14 @@ export function photosynthesize(state: GameState, light: Map<string, number>, in
 
 // Metabolism: per-tick water (transpiration) and energy consumption. Runs before
 // diffusion so the leaf's depleted water steepens the gradient that pulls water up
-// the tree — transpiration suction is emergent, not special-cased.
-function metabolize(state: GameState): GameState {
+// the tree — transpiration suction is emergent, not special-cased. `mult` scales
+// all consumption (winter dormancy passes 0.5).
+function metabolize(state: GameState, mult: number): GameState {
   const newCells = new Map(state.cells)
   for (const [key, cell] of state.cells) {
     let w = 0, e = 0
     switch (cell.type) {
-      case 'tree':   w = 0.05; e = 0.03; break
+      case 'tree':   w = 0.05; e = 0.015; break
       case 'leaf':   w = 0.10; e = 0.02; break
       case 'flower': w = 0.15; e = 0.10; break
       case 'fruit':  w = 0.20; e = 0.05; break
@@ -191,8 +197,8 @@ function metabolize(state: GameState): GameState {
     if (w === 0 && e === 0) continue
     newCells.set(key, {
       ...cell,
-      water:  Math.max(0, cell.water  - w),
-      energy: Math.max(0, cell.energy - e),
+      water:  Math.max(0, cell.water  - w * mult),
+      energy: Math.max(0, cell.energy - e * mult),
     })
   }
   return { ...state, cells: newCells }
@@ -363,50 +369,110 @@ export function updateHealth(state: GameState): GameState {
 // Stub: rot spread (Milestone 9)
 function spreadRot(state: GameState, _rng: RNG): GameState { return state }
 
-// Soil update: evaporation, water table refill, rain placeholder.
-function updateSoil(state: GameState, _rng: RNG): GameState {
+// Soil update: rain deposition, evaporation, and the deep water table.
+// Rain falls only on rain ticks (into the top 3–4 rows); evaporation rate is
+// seasonal and amplified by drought; the water table at depth ≥ 18 always regens.
+function updateSoil(state: GameState, weather: SeasonWeather, tick: number): GameState {
   const work = new Map(state.cells)
+  const raining = weather.rain[tick]
+  const evapBase = weather.season === 'summer' ? 0.05 : 0.01
+  const evap = evapBase * (weather.isDrought ? 1.5 : 1)
+
   for (const [key, cell] of state.cells) {
     if (cell.type !== 'soil') continue
     const depth = cell.r - surfaceR(cell.q)
     let w = cell.water
 
-    if (depth <= 1) w = Math.max(0, w - 0.03)           // evaporation: top 2 rows
-    if (depth >= 18) w = Math.min(SOIL_WATER_CAP, w + 0.1) // water table
-
-    // TODO: replace with weather events (M6)
-    if (depth === 0) w = Math.min(SOIL_WATER_CAP, w + 0.15)
+    if (depth <= 1) w = Math.max(0, w - evap)                       // evaporation: top 2 rows
+    if (raining && depth <= 3) w = Math.min(SOIL_WATER_CAP, w + RAIN_DEPOSIT)  // rain: top 4 rows
+    if (depth >= 18) w = Math.min(SOIL_WATER_CAP, w + 0.1)          // water table
 
     if (w !== cell.water) work.set(key, { ...cell, water: w })
   }
   return { ...state, cells: work }
 }
 
+// Winter onset (first tick of winter): every leaf drops — the deciduous reset — and
+// any growth placed during the winter planning phase (age 0) is killed by frost.
+// Flowers/fruit also drop, though none normally survive into winter. A leaf you
+// never shed still resorbs a small fraction of its energy back into the tree (a
+// player who sheds in fall recovers far more — see LEAF_SHED_RESORB).
+function winterFrost(state: GameState): GameState {
+  const work = new Map(state.cells)
+  for (const [key, cell] of state.cells) {
+    if (cell.type === 'leaf' || cell.type === 'flower' || cell.type === 'fruit') {
+      if (cell.type === 'leaf') depositResorb(work, cell, cell.energy * LEAF_FROST_RESORB)
+      work.delete(key)
+    } else if (cell.type === 'tree' && cell.age === 0) {
+      work.delete(key)
+    }
+  }
+  return { ...state, cells: work }
+}
+
+// Distribute `amount` energy evenly into the tree cells adjacent to a dropping leaf,
+// clamped to capacity (overflow is lost). Mutates `work` in place.
+function depositResorb(work: Map<string, Cell>, leaf: Cell, amount: number): void {
+  if (amount <= 0) return
+  const treeKeys: string[] = []
+  for (const [dq, dr] of HEX_NEIGHBORS) {
+    const nk = hexKey(leaf.q + dq, leaf.r + dr)
+    if (work.get(nk)?.type === 'tree') treeKeys.push(nk)
+  }
+  if (treeKeys.length === 0) return
+  const share = amount / treeKeys.length
+  for (const nk of treeKeys) {
+    const t = work.get(nk)!
+    work.set(nk, { ...t, energy: Math.min(CELL_ENERGY_CAP, t.energy + share) })
+  }
+}
+
+// Age every living cell (and deadwood) by one season. Runs once, after the last
+// tick, so a cell committed this season enters its first winter still at age 0.
+function ageCells(state: GameState): GameState {
+  const work = new Map(state.cells)
+  for (const [key, cell] of state.cells) {
+    if (cell.type === 'soil' || cell.type === 'rock') continue
+    work.set(key, { ...cell, age: cell.age + 1 })
+  }
+  return { ...state, cells: work }
+}
+
 // ─── tick & season ────────────────────────────────────────────────────────────
 
-function runTick(state: GameState, rng: RNG): GameState {
+function runTick(state: GameState, rng: RNG, weather: SeasonWeather, tick: number): GameState {
   let s = state
-  const light = computeLight(s, SUN_ANGLE_DEG)
-  s = photosynthesize(s, light, LIGHT_INTENSITY)
-  s = metabolize(s)
+  // Winter onset frost happens before anything else on the first tick.
+  if (tick === 0 && weather.season === 'winter') s = winterFrost(s)
+
+  const raining = weather.rain[tick]
+  const light = computeLight(s, weather.sunAngleDeg)
+  const intensity = weather.intensity * (raining ? CLOUD_LIGHT_MULT : 1)
+  s = photosynthesize(s, light, intensity)
+
+  const metabMult = weather.season === 'winter' ? WINTER_METAB_MULT : 1
+  s = metabolize(s, metabMult)
   s = absorbWater(s, rng)
   s = diffuseWater(s, rng)
   s = diffuseEnergy(s, rng)
   s = updateHealth(s)
   s = spreadRot(s, rng)
-  s = updateSoil(s, rng)
+  s = updateSoil(s, weather, tick)
   return s
 }
 
-// Returns an array of 60 GameState snapshots (one per tick).
+// Returns one GameState snapshot per tick (length = weather.rain.length).
 // Soil is pre-expanded once so tick functions never query terrain themselves.
-export function simulateSeason(state: GameState, rng: RNG): GameState[] {
+// Surviving cells age by one season in the final frame.
+export function simulateSeason(state: GameState, rng: RNG, weather: SeasonWeather): GameState[] {
   let cur: GameState = { ...state, cells: buildWork(state) }
   const frames: GameState[] = []
-  for (let tick = 0; tick < 60; tick++) {
-    cur = runTick(cur, rng)
+  const ticks = weather.rain.length
+  for (let tick = 0; tick < ticks; tick++) {
+    cur = runTick(cur, rng, weather, tick)
     frames.push(cur)
   }
+  if (frames.length > 0) frames[frames.length - 1] = ageCells(frames[frames.length - 1])
   return frames
 }
 

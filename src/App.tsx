@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback, useEffect, type RefObject } from 'react'
 import { GameCanvas, type GameCanvasHandle } from './game/GameCanvas'
-import { HUD } from './ui/HUD'
-import { createInitialState, type GameState } from './game/state'
+import { HUD, type ForecastDisplay } from './ui/HUD'
+import { SeasonSummary } from './ui/SeasonSummary'
+import { createInitialState, type GameState, type Season } from './game/state'
 import {
   createPlanningState,
   handleTap,
@@ -11,8 +12,41 @@ import {
   type PlanningState,
   type PlacementMode,
 } from './game/planning'
+import { buildSeasonSummary, type SeasonSummaryData } from './game/summary'
+import {
+  generateWeather,
+  weatherHeadline,
+  nextSeasonYear,
+  seasonTrend,
+  SEASON_MONTHS,
+  type SeasonWeather,
+} from './sim/weather'
 import { simulateSeason, mulberry32 } from './sim/simulate'
 import './App.css'
+
+const SEASON_LABEL: Record<Season, string> = {
+  spring: 'Spring', summer: 'Summer', fall: 'Fall', winter: 'Winter',
+}
+
+// Build the HUD's forecast block for the season the player is currently planning.
+function makeForecast(game: GameState): ForecastDisplay {
+  const here = generateWeather(game.season, game.year, game.worldSeed)
+  const now = weatherHeadline(here)
+
+  const next = nextSeasonYear(game.season, game.year)
+  const nextHeadline = weatherHeadline(generateWeather(next.season, next.year, game.worldSeed))
+
+  // Two seasons out is only a vague trend (CLAUDE.md forecasting rules).
+  const twoOut = nextSeasonYear(next.season, next.year)
+
+  return {
+    monthRange: SEASON_MONTHS[game.season],
+    weatherIcon: now.icon,
+    weatherLabel: now.label,
+    nextSeasonLabel: SEASON_LABEL[next.season],
+    nextForecast: `${nextHeadline.label} · then ${seasonTrend(twoOut.season)}`,
+  }
+}
 
 const TICKS_PER_SECOND = 12
 const MS_PER_TICK = 1000 / TICKS_PER_SECOND
@@ -31,6 +65,12 @@ export function App() {
   const [seasonYear, setSeasonYear]    = useState({ season: gameRef.current.season, year: gameRef.current.year })
   const [isPlaying, setIsPlaying]      = useState(false)
   const [playbackProgress, setProgress] = useState(0)
+  const [forecast, setForecast]        = useState<ForecastDisplay>(() => makeForecast(gameRef.current))
+  const [summary, setSummary]          = useState<SeasonSummaryData | null>(null)
+
+  // Captured at advance time so finishPlayback can diff committed→final for the
+  // season summary (the final state isn't known until playback completes/skips).
+  const summaryInputRef = useRef<{ committed: GameState; weather: SeasonWeather } | null>(null)
 
   // Keep a ref to mode so the tap handler always sees the current value
   const modeRef = useRef<PlacementMode>('branch')
@@ -61,7 +101,16 @@ export function App() {
     const newPlanning = createPlanningState(bankedEnergy(finalState.cells))
     planningRef.current = newPlanning
 
+    // Build the season summary by diffing the committed (pre-sim) state against the
+    // final state, using the weather captured at advance time.
+    const si = summaryInputRef.current
+    if (si) {
+      setSummary(buildSeasonSummary(si.committed, finalState, si.weather))
+      summaryInputRef.current = null
+    }
+
     setSeasonYear({ season: finalState.season, year: finalState.year })
+    setForecast(makeForecast(gameRef.current))
     setEnergy(newPlanning.energyAvailable)
     setEnergyTotal(newPlanning.energyAvailable)
     setCanAdvance(true)
@@ -133,12 +182,19 @@ export function App() {
   const onAdvanceSeason = useCallback(() => {
     if (isPlaying) return
 
-    // 1. Commit staged cells → new game state (season NOT yet advanced)
-    const committed = applySeasonAdvance(gameRef.current, planningRef.current)
+    // 0. Weather for the season being PLANNED (before the label advances). This is
+    //    the single source of season truth for the simulation, so it stays correct
+    //    even though applySeasonAdvance rolls the label forward to the next season.
+    const cur = gameRef.current
+    const weather = generateWeather(cur.season, cur.year, cur.worldSeed)
 
-    // 2. Run simulation
+    // 1. Commit staged cells → new game state (label advanced to the next season)
+    const committed = applySeasonAdvance(cur, planningRef.current)
+    summaryInputRef.current = { committed, weather }
+
+    // 2. Run simulation under the planned season's weather
     const rng = mulberry32(committed.rngSeed)
-    const frames = simulateSeason(committed, rng)
+    const frames = simulateSeason(committed, rng, weather)
 
     // 3. Animate
     startPlayback(frames)
@@ -165,6 +221,7 @@ export function App() {
         energyTotal={energyTotal}
         season={seasonYear.season}
         year={seasonYear.year}
+        forecast={forecast}
         mode={mode}
         canAdvance={canAdvance}
         isPlaying={isPlaying}
@@ -173,6 +230,7 @@ export function App() {
         onAdvanceSeason={onAdvanceSeason}
         onSkip={onSkip}
       />
+      {summary && <SeasonSummary data={summary} onDismiss={() => setSummary(null)} />}
     </div>
   )
 }

@@ -7,6 +7,13 @@
   justify-content: space-between;
 }
 
+/* Groups the top bar, warning, and progress bar so they stay pinned to the top
+   (otherwise space-between floats the progress bar into the screen's center). */
+.topGroup {
+  display: flex;
+  flex-direction: column;
+}
+
 /* ── Top bar ─────────────────────────────────────────────────────────────── */
 .topBar {
   display: flex;
@@ -21,8 +28,38 @@
   pointer-events: auto;
 }
 
+.seasonBlock { display: flex; flex-direction: column; line-height: 1.25; }
 .season { font-weight: 600; letter-spacing: 0.02em; }
+.months { font-size: 11px; color: rgba(255, 255, 255, 0.5); }
+
+.weatherBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.3;
+  text-align: center;
+  flex: 1;
+}
+.weatherNow  { font-size: 14px; font-weight: 600; }
+.weatherNext { font-size: 11px; color: rgba(255, 255, 255, 0.5); }
+
 .score  { font-size: 16px; }
+
+/* ── Winter planting warning ─────────────────────────────────────────────── */
+.warning {
+  align-self: center;
+  margin-top: 8px;
+  padding: 6px 14px;
+  font-family: system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: #cfe5ff;
+  background: rgba(40, 80, 130, 0.75);
+  border: 1px solid rgba(140, 190, 240, 0.5);
+  border-radius: 16px;
+  backdrop-filter: blur(4px);
+  pointer-events: auto;
+}
 
 /* ── Playback progress bar ───────────────────────────────────────────────── */
 .progressTrack {

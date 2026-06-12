@@ -25,6 +25,9 @@ export function drawScene(
   stagedCells: Map<string, Cell>,
   shedMarked: Set<string>,
   validPlacements: Map<string, 'tree' | 'leaf'>,
+  // Light level (0–1) per leaf cell key — drives the per-leaf sun indicator during
+  // planning. Empty during playback. Includes staged leaves (prospective shading).
+  leafLight: Map<string, number>,
 ): void {
   ctx.clearRect(0, 0, width, height)
   ctx.fillStyle = '#1a1a2e'
@@ -74,13 +77,17 @@ export function drawScene(
 
   // ── Pass 2: real game cells ────────────────────────────────────────────────
   for (const { cell, sx, sy } of treeCells) {
-    const isShedMarked = shedMarked.has(hexKey(cell.q, cell.r))
+    const key = hexKey(cell.q, cell.r)
+    const isShedMarked = shedMarked.has(key)
     if (isShedMarked) {
       // Draw wilting yellow tint
       drawFilledHex(ctx, sx, sy, r, '#C8A020', 'rgba(0,0,0,0.3)', 0.5)
       drawShedX(ctx, sx, sy, r)
     } else {
       drawFilledHex(ctx, sx, sy, r, cellColor(cell), 'rgba(255,255,255,0.55)', 1.5)
+      if (cell.type === 'leaf' && leafLight.has(key)) {
+        drawLeafSun(ctx, sx, sy, r, leafLight.get(key)!)
+      }
     }
   }
 
@@ -139,7 +146,52 @@ export function drawScene(
     ctx.stroke()
     ctx.setLineDash([])
     ctx.restore()
+
+    // Sun indicators on staged leaves — preview how much light a planned leaf would
+    // get given the (real + staged) canopy above it.
+    for (const [key, cell] of stagedCells) {
+      if (cell.type !== 'leaf' || !leafLight.has(key)) continue
+      const { x: wx, y: wy } = hexToPixel(cell.q, cell.r, BASE_RADIUS)
+      const { sx, sy } = worldToScreen(wx, wy, camera, width, height)
+      drawLeafSun(ctx, sx, sy, r, leafLight.get(key)!)
+    }
   }
+}
+
+// A small sun glyph at a leaf's upper-right, sized and brightened by how much light
+// the leaf receives (0 = deeply shaded, 1 = full sun). Makes the otherwise-invisible
+// canopy self-shading legible: stacked leaves visibly dim toward the bottom.
+function drawLeafSun(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, level: number): void {
+  const lvl = Math.max(0, Math.min(1, level))
+  const x = cx + r * 0.42
+  const y = cy - r * 0.42
+  const disc = r * (0.12 + 0.16 * lvl)
+  const alpha = 0.3 + 0.65 * lvl
+  const rayLen = disc * (0.5 + 1.0 * lvl)
+
+  ctx.save()
+  ctx.globalAlpha = alpha
+  ctx.fillStyle = '#FFD54A'
+  ctx.strokeStyle = '#FFD54A'
+  ctx.lineWidth = Math.max(0.5, r * 0.06)
+
+  // rays
+  if (rayLen > 0.6) {
+    for (let i = 0; i < 8; i++) {
+      const a = (i * Math.PI) / 4
+      const x0 = x + Math.cos(a) * disc * 1.3
+      const y0 = y + Math.sin(a) * disc * 1.3
+      ctx.beginPath()
+      ctx.moveTo(x0, y0)
+      ctx.lineTo(x0 + Math.cos(a) * rayLen, y0 + Math.sin(a) * rayLen)
+      ctx.stroke()
+    }
+  }
+  // disc
+  ctx.beginPath()
+  ctx.arc(x, y, disc, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
 }
 
 function drawShedX(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number): void {

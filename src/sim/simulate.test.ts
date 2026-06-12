@@ -8,6 +8,7 @@ import {
   simulateSeason,
 } from './simulate'
 import { mulberry32 } from './rng'
+import { generateWeather } from './weather'
 import { hexKey } from './grid'
 import { TerrainGen, surfaceR } from './terrain'
 import type { GameState } from '../game/state'
@@ -25,6 +26,7 @@ function makeState(cells: Cell[]): GameState {
     year: 1,
     score: 0,
     rngSeed: 42,
+    worldSeed: 99,
   }
 }
 
@@ -285,6 +287,47 @@ describe('updateHealth — recovery', () => {
   })
 })
 
+// ─── winter onset frost (deciduous reset) ────────────────────────────────────
+
+describe('simulateSeason — winter onset', () => {
+  // A small tree whose cells have lived a season (age 1) plus a fresh winter graft.
+  function winterTree(): Cell[] {
+    return [
+      { q: 0, r: 0,  type: 'tree', water: 5, energy: 5, health: 1, rot: 0, age: 2 },   // root
+      { q: 0, r: -1, type: 'tree', water: 5, energy: 5, health: 1, rot: 0, age: 2 },   // trunk
+      { q: 0, r: -2, type: 'leaf', water: 5, energy: 5, health: 1, rot: 0, age: 1 },   // overwintering leaf
+      { q: 1, r: -1, type: 'tree', water: 5, energy: 5, health: 1, rot: 0, age: 0 },   // fresh winter graft
+    ]
+  }
+
+  it('drops every leaf at the first winter tick', () => {
+    const state = makeState(winterTree())
+    const weather = generateWeather('winter', 3, 99)
+    const frames = simulateSeason(state, mulberry32(1), weather)
+    // The leaf is gone from the very first frame.
+    expect(frames[0].cells.has(hexKey(0, -2))).toBe(false)
+    expect(frames[frames.length - 1].cells.has(hexKey(0, -2))).toBe(false)
+  })
+
+  it('kills fresh (age-0) growth but spares established wood', () => {
+    const state = makeState(winterTree())
+    const weather = generateWeather('winter', 3, 99)
+    const frames = simulateSeason(state, mulberry32(1), weather)
+    const final = frames[frames.length - 1]
+    expect(final.cells.has(hexKey(1, -1))).toBe(false)  // fresh graft frozen out
+    expect(final.cells.get(hexKey(0, 0))?.type).toBe('tree')   // root survives
+    expect(final.cells.get(hexKey(0, -1))?.type).toBe('tree')  // trunk survives
+  })
+
+  it('ages surviving cells by one season', () => {
+    const state = makeState(winterTree())
+    const weather = generateWeather('winter', 3, 99)
+    const frames = simulateSeason(state, mulberry32(1), weather)
+    const root = frames[frames.length - 1].cells.get(hexKey(0, 0))!
+    expect(root.age).toBe(3)  // was 2
+  })
+})
+
 // ─── integration: transpiration suction ──────────────────────────────────────
 
 describe('simulateSeason — transpiration suction (tick-order integration)', () => {
@@ -302,7 +345,8 @@ describe('simulateSeason — transpiration suction (tick-order integration)', ()
       mkCell(0, -3, 'tree', { water: 5 }),
       mkCell(0, -4, 'leaf', { water: 5 }),   // canopy
     ])
-    const frames = simulateSeason(state, mulberry32(7))
+    const weather = generateWeather('spring', 1, 99)
+    const frames = simulateSeason(state, mulberry32(7), weather)
     const final = frames[frames.length - 1]
     const leaf = final.cells.get(hexKey(0, -4))
     // A leaf transpiring 0.10/tick for 60 ticks would lose 6 units — more than its

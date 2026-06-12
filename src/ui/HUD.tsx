@@ -2,11 +2,20 @@ import styles from './HUD.module.css'
 import type { PlacementMode } from '../game/planning'
 import type { Season } from '../game/state'
 
+export interface ForecastDisplay {
+  monthRange: string      // "Mar–May"
+  weatherIcon: string     // this season's exact conditions
+  weatherLabel: string
+  nextSeasonLabel: string // "Summer"
+  nextForecast: string    // reliable general forecast
+}
+
 interface HUDProps {
   energyRemaining: number
   energyTotal: number
   season: Season
   year: number
+  forecast: ForecastDisplay
   mode: PlacementMode
   canAdvance: boolean
   isPlaying: boolean
@@ -24,7 +33,7 @@ const SEASON_LABEL: Record<Season, string> = {
 }
 
 export function HUD({
-  energyRemaining, energyTotal, season, year, mode, canAdvance,
+  energyRemaining, energyTotal, season, year, forecast, mode, canAdvance,
   isPlaying, playbackProgress,
   onModeChange, onAdvanceSeason, onSkip,
 }: HUDProps) {
@@ -34,11 +43,31 @@ export function HUD({
 
   return (
     <div className={styles.hud}>
+      {/* Top group — pinned to the top of the screen */}
+      <div className={styles.topGroup}>
       {/* Top bar */}
       <div className={styles.topBar}>
-        <span className={styles.season}>{SEASON_LABEL[season]}, Year {year}</span>
+        <div className={styles.seasonBlock}>
+          <span className={styles.season}>{SEASON_LABEL[season]}, Year {year}</span>
+          <span className={styles.months}>{forecast.monthRange}</span>
+        </div>
+        <div className={styles.weatherBlock}>
+          <span className={styles.weatherNow} title="This season">
+            {forecast.weatherIcon} {forecast.weatherLabel}
+          </span>
+          <span className={styles.weatherNext} title="Next season (forecast)">
+            Next: {forecast.nextSeasonLabel} · {forecast.nextForecast}
+          </span>
+        </div>
         <span className={styles.score}>🌰 0</span>
       </div>
+
+      {/* Winter planting warning */}
+      {!isPlaying && season === 'winter' && (
+        <div className={styles.warning}>
+          ❄️ Frost ahead — anything you plant now will die at winter's first frost.
+        </div>
+      )}
 
       {/* Playback progress bar — only visible during simulation */}
       {isPlaying && (
@@ -46,6 +75,7 @@ export function HUD({
           <div className={styles.progressBar} style={{ width: `${playbackProgress * 100}%` }} />
         </div>
       )}
+      </div>
 
       {/* Bottom bar */}
       <div className={styles.bottomBar}>

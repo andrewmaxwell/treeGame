@@ -23,6 +23,7 @@ function makeState(cells: Cell[]): GameState {
     year: 1,
     score: 0,
     rngSeed: 42,
+    worldSeed: 99,
   }
 }
 
@@ -77,7 +78,8 @@ describe('applySeasonAdvance — energy economy', () => {
   })
 
   it('materializes the shed refund into surviving cells', () => {
-    // Tree (energy 4) + leaf to shed. Shedding refunds 0.5 into the tree.
+    // Tree (energy 4) + leaf (energy 2) to shed. Resorption is proportional:
+    // 0.75 × 2 = 1.5 refunded into the tree.
     const game = makeState([
       mkCell(0,  0, 'tree', { energy: 4 }),
       mkCell(0, -1, 'leaf', { energy: 2 }),
@@ -89,7 +91,7 @@ describe('applySeasonAdvance — energy economy', () => {
 
     const after = applySeasonAdvance(game, p)
     expect(after.cells.has(hexKey(0, -1))).toBe(false)          // leaf dropped
-    expect(after.cells.get(hexKey(0, 0))!.energy).toBeCloseTo(4.5, 5)  // +0.5 refund
+    expect(after.cells.get(hexKey(0, 0))!.energy).toBeCloseTo(5.5, 5)  // +1.5 refund
   })
 
   it('staging a branch over a shed-marked leaf clears the mark; the branch survives advance', () => {
@@ -101,7 +103,7 @@ describe('applySeasonAdvance — energy economy', () => {
     p = handleTap(0, -1, 'leaf', game, p).planning!    // mark leaf for shedding
     p = stage(0, -1, 'branch', game, p)                // then stage a branch over it
     expect(p.shedMarked.size).toBe(0)                  // mark cleared
-    expect(p.energySpent).toBeCloseTo(1, 5)            // −0.5 refund undone, +1 cost
+    expect(p.energySpent).toBeCloseTo(1, 5)            // −1.5 refund undone, +1 cost = net 1
 
     const after = applySeasonAdvance(game, p)
     const cell = after.cells.get(hexKey(0, -1))

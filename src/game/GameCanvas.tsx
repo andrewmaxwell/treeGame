@@ -1,10 +1,15 @@
 import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle, type RefObject } from 'react'
 import { createCamera, clampZoom, screenToWorld, type Camera } from '../render/camera'
 import { drawScene, BASE_RADIUS } from '../render/renderer'
+import { computeLight } from '../sim/simulate'
+import { SEASON_PARAMS } from '../sim/weather'
 import { pixelToHex, hexToPixel } from '../sim/grid'
 import { surfaceR } from '../sim/terrain'
+import type { Cell } from '../sim/cells'
 import type { GameState } from './state'
 import { getValidPlacements, type PlanningState, type PlacementMode } from './planning'
+
+const EMPTY_LIGHT = new Map<string, number>()
 
 export interface GameCanvasHandle {
   requestDraw: () => void
@@ -17,6 +22,15 @@ interface GameCanvasProps {
   modeRef:    RefObject<PlacementMode>
   isPlaying:  boolean
   onTap: (q: number, r: number) => void
+}
+
+// Light map over the real + staged canopy, for the per-leaf sun indicators. Computed
+// fresh on each (change-driven) planning render — cheap and always reflects staging.
+function computePlanningLight(game: GameState, planning: PlanningState): Map<string, number> {
+  if (planning.stagedCells.size === 0 && game.cells.size === 0) return EMPTY_LIGHT
+  const merged = new Map<string, Cell>(game.cells)
+  for (const [k, c] of planning.stagedCells) merged.set(k, c)
+  return computeLight({ ...game, cells: merged }, SEASON_PARAMS[game.season].sunAngleDeg)
 }
 
 function makeCamera(): Camera {
@@ -78,7 +92,10 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
           const vp = isPlaying ? new Map() : getValidPlacements(m, g, p)
           const staged = isPlaying ? new Map() : p.stagedCells
           const shed   = isPlaying ? new Set<string>() : p.shedMarked
-          drawScene(ctx, width, height, drawCam, g.cells, g.terrain, staged, shed, vp)
+          // During planning, show how much sun each leaf (real + staged) receives
+          // under the current season's sun angle, including staged-canopy shading.
+          const leafLight = isPlaying ? EMPTY_LIGHT : computePlanningLight(g, p)
+          drawScene(ctx, width, height, drawCam, g.cells, g.terrain, staged, shed, vp, leafLight)
         }
       }
 
@@ -132,6 +149,13 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
         onTap(q, r)
       }
     }, [onTap])
+
+    // Leaving the canvas only cancels an in-progress drag — it must NOT be treated as
+    // a tap, or moving the cursor onto the HUD would fire a phantom (often rejected,
+    // hence shaking) placement at the exit point.
+    const onMouseLeave = useCallback(() => {
+      panRef.current.dragging = false
+    }, [])
 
     // ── Wheel zoom (non-passive) ──────────────────────────────────────────────
     useEffect(() => {
@@ -217,7 +241,7 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
-        onMouseLeave={onMouseUp}
+        onMouseLeave={onMouseLeave}
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}

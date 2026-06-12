@@ -1,5 +1,5 @@
 import type { Cell, CellType } from '../sim/cells'
-import { CELL_ENERGY_CAP } from '../sim/cells'
+import { CELL_ENERGY_CAP, LEAF_SHED_RESORB } from '../sim/cells'
 import { HEX_NEIGHBORS, hexKey } from '../sim/grid'
 import { surfaceR } from '../sim/terrain'
 import type { GameState, Season } from './state'
@@ -7,7 +7,13 @@ import type { GameState, Season } from './state'
 export type PlacementMode = 'branch' | 'leaf'
 
 export const CELL_COST = 1     // energy cost per staged tree/leaf cell
-export const SHED_REFUND = 0.5 // energy refunded per shed leaf (nutrient resorption)
+
+// Energy refunded for shedding a leaf in fall planning: a fraction of the energy the
+// leaf is actually holding (nutrient resorption). Proportional, not flat, so the
+// canopy is a recoverable store rather than a sunk cost.
+export function shedRefund(leaf: Cell): number {
+  return leaf.energy * LEAF_SHED_RESORB
+}
 
 function isLivingType(t: CellType): boolean {
   return t === 'tree' || t === 'leaf' || t === 'flower' || t === 'fruit'
@@ -32,8 +38,9 @@ export interface PlanningState {
   stagedCells: Map<string, Cell>
   shedMarked: Set<string>
   energyAvailable: number
-  // Tracks spending: +1 per staged cell, -0.5 per shed-marked leaf (previews the
-  // season-advance refund so the live budget stays accurate).
+  // Tracks spending: +1 per staged cell, minus the proportional refund per
+  // shed-marked leaf (previews the season-advance refund so the live budget stays
+  // accurate).
   energySpent: number
 }
 
@@ -74,14 +81,14 @@ export function handleTap(
   if (realCell?.type === 'leaf') {
     if (mode === 'leaf') {
       // leaf mode: toggle shed marker
-      return { kind: 'shed_toggled', planning: toggleShed(key, planning) }
+      return { kind: 'shed_toggled', planning: toggleShed(key, planning, game) }
     }
     // branch mode: stage a tree cell here, replacing the leaf on advance.
     // If the leaf was shed-marked, the mark is cleared (it's being replaced, not
     // shed), which also takes back the previewed refund — so the effective cost
     // includes it. Without this, advancing would delete the staged branch.
     const wasShedMarked = planning.shedMarked.has(key)
-    const cost = CELL_COST + (wasShedMarked ? SHED_REFUND : 0)
+    const cost = CELL_COST + (wasShedMarked ? shedRefund(realCell) : 0)
     if (!canAfford(planning, cost)) return { kind: 'rejected_energy' }
     if (!isAdjacentToValidAnchor(q, r, game, planning)) return { kind: 'rejected_adjacent' }
     const replacement: Cell = { q, r, type: 'tree', water: 2, energy: 1, health: 1, rot: 0, age: 0, staged: true }
@@ -134,14 +141,16 @@ function isAdjacentToValidAnchor(q: number, r: number, game: GameState, planning
   return false
 }
 
-function toggleShed(key: string, planning: PlanningState): PlanningState {
+function toggleShed(key: string, planning: PlanningState, game: GameState): PlanningState {
+  const leaf = game.cells.get(key)
+  const refund = leaf ? shedRefund(leaf) : 0
   const newShed = new Set(planning.shedMarked)
   if (newShed.has(key)) {
     newShed.delete(key)
-    return { ...planning, shedMarked: newShed, energySpent: planning.energySpent + SHED_REFUND }
+    return { ...planning, shedMarked: newShed, energySpent: planning.energySpent + refund }
   }
   newShed.add(key)
-  return { ...planning, shedMarked: newShed, energySpent: planning.energySpent - SHED_REFUND }
+  return { ...planning, shedMarked: newShed, energySpent: planning.energySpent - refund }
 }
 
 function unstageWithCascade(removedKey: string, planning: PlanningState, game: GameState): PlanningState {
@@ -269,10 +278,13 @@ export function applySeasonAdvance(game: GameState, planning: PlanningState): Ga
     if (!planning.stagedCells.has(key) && game.cells.get(key)?.type === 'leaf') shedKeys.push(key)
   }
 
-  // Net energy cost of the whole plan: placements minus shed refunds. This must be
-  // DEDUCTED from the tree's cells — the budget is real banked energy now (M5), so
-  // skipping this step would mint energy from nothing every season.
-  const netCost = planning.stagedCells.size * CELL_COST - shedKeys.length * SHED_REFUND
+  // Net energy cost of the whole plan: placements minus shed refunds (each refund is
+  // proportional to the shed leaf's stored energy). This must be DEDUCTED from the
+  // tree's cells — the budget is real banked energy now (M5), so skipping this step
+  // would mint energy from nothing every season.
+  let shedRefundTotal = 0
+  for (const key of shedKeys) shedRefundTotal += shedRefund(game.cells.get(key)!)
+  const netCost = planning.stagedCells.size * CELL_COST - shedRefundTotal
 
   // The payers: pre-existing living cells that survive the plan (not shed, not
   // replaced by a staged cell). New cells' starting energy is part of the cost.

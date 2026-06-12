@@ -13,7 +13,8 @@ export interface GameState {
   season: Season
   year: number
   score: number
-  rngSeed: number  // seed used to produce the NEXT season's RNG
+  rngSeed: number   // seed used to produce the NEXT season's RNG
+  worldSeed: number // stable for the whole run; drives deterministic weather/forecast
 }
 
 export function createInitialState(): GameState {
@@ -32,5 +33,9 @@ export function createInitialState(): GameState {
   }
   cells.set(hexKey(0, seedR), seed)
 
-  return { cells, terrain, season: 'spring', year: 1, score: 0, rngSeed: Math.floor(Math.random() * 0xFFFFFFFF) }
+  return {
+    cells, terrain, season: 'spring', year: 1, score: 0,
+    rngSeed: Math.floor(Math.random() * 0xFFFFFFFF),
+    worldSeed: Math.floor(Math.random() * 0xFFFFFFFF),
+  }
 }
