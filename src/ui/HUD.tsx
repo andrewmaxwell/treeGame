@@ -119,8 +119,9 @@ export function HUD({
               <button
                 className={`${styles.modeBtn} ${mode === 'branch' ? styles.modeBtnActive : ''}`}
                 onClick={() => onModeChange('branch')}
+                title="Grow woody cells: roots below ground, trunk/branches above"
               >
-                Branch
+                Wood
               </button>
               <button
                 className={`${styles.modeBtn} ${mode === 'leaf' ? styles.modeBtnActive : ''}`}

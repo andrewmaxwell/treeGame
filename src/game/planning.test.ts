@@ -78,9 +78,9 @@ describe('applySeasonAdvance — energy economy', () => {
     expect(bankedEnergy(after.cells)).toBeCloseTo(8, 5)
   })
 
-  it('materializes the shed refund into surviving cells', () => {
-    // Tree (energy 4) + leaf (energy 2) to shed. Resorption is proportional:
-    // 0.75 × 2 = 1.5 refunded into the tree.
+  it('shedding is budget-neutral and does NOT drop the leaf at advance', () => {
+    // Resorption now happens at season END (in the sim), not at advance — so the
+    // leaf is still present after advance, and marking it costs nothing now.
     const game = makeState([
       mkCell(0,  0, 'tree', { energy: 4 }),
       mkCell(0, -1, 'leaf', { energy: 2 }),
@@ -89,10 +89,10 @@ describe('applySeasonAdvance — energy economy', () => {
     const result = handleTap(0, -1, 'leaf', game, p)  // leaf mode on a real leaf → shed mark
     expect(result.kind).toBe('shed_toggled')
     p = result.planning!
+    expect(p.energySpent).toBe(0)                      // budget-neutral
 
     const after = applySeasonAdvance(game, p)
-    expect(after.cells.has(hexKey(0, -1))).toBe(false)          // leaf dropped
-    expect(after.cells.get(hexKey(0, 0))!.energy).toBeCloseTo(5.5, 5)  // +1.5 refund
+    expect(after.cells.has(hexKey(0, -1))).toBe(true)  // leaf survives advance; sim drops it
   })
 
   it('staging a branch over a shed-marked leaf clears the mark; the branch survives advance', () => {
@@ -104,7 +104,7 @@ describe('applySeasonAdvance — energy economy', () => {
     p = handleTap(0, -1, 'leaf', game, p).planning!    // mark leaf for shedding
     p = stage(0, -1, 'branch', game, p)                // then stage a branch over it
     expect(p.shedMarked.size).toBe(0)                  // mark cleared
-    expect(p.energySpent).toBeCloseTo(1, 5)            // −1.5 refund undone, +1 cost = net 1
+    expect(p.energySpent).toBeCloseTo(1, 5)            // shedding is free, +1 for the branch
 
     const after = applySeasonAdvance(game, p)
     const cell = after.cells.get(hexKey(0, -1))

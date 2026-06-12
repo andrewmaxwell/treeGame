@@ -9,6 +9,7 @@ import {
   createPlanningState,
   handleTap,
   applySeasonAdvance,
+  resolvableShedKeys,
   computeReachable,
   bankedEnergy,
   CELL_COST,
@@ -294,15 +295,17 @@ export function App() {
     //    even though applySeasonAdvance rolls the label forward to the next season.
     const cur = gameRef.current
     const weather = generateWeather(cur.season, cur.year, cur.worldSeed)
-    const shedThisTurn = planningRef.current.shedMarked.size > 0
+    const shedKeys = resolvableShedKeys(cur, planningRef.current)
+    const shedThisTurn = shedKeys.size > 0
 
     // 1. Commit staged cells → new game state (label advanced to the next season)
     const committed = applySeasonAdvance(cur, planningRef.current)
     summaryInputRef.current = { committed, weather, shedThisTurn }
 
-    // 2. Run simulation under the planned season's weather
+    // 2. Run simulation under the planned season's weather; shed leaves resorb + drop
+    //    at season end (after photosynthesizing all season).
     const rng = mulberry32(committed.rngSeed)
-    const frames = simulateSeason(committed, rng, weather)
+    const frames = simulateSeason(committed, rng, weather, shedKeys)
 
     // 3. Animate
     startPlayback(frames)

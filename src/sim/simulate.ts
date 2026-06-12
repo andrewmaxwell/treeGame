@@ -1,5 +1,5 @@
 import type { Cell, CellType } from './cells'
-import { CELL_WATER_CAP, CELL_ENERGY_CAP, SOIL_WATER_CAP, LEAF_FROST_RESORB } from './cells'
+import { CELL_WATER_CAP, CELL_ENERGY_CAP, SOIL_WATER_CAP, LEAF_FROST_RESORB, LEAF_SHED_RESORB } from './cells'
 import { hexKey, HEX_NEIGHBORS } from './grid'
 import { surfaceR } from './terrain'
 import type { RNG } from './rng'
@@ -427,6 +427,22 @@ function depositResorb(work: Map<string, Cell>, leaf: Cell, amount: number): voi
   }
 }
 
+// Resolve fall shedding at SEASON END: each still-present shed leaf resorbs most of
+// its energy (LEAF_SHED_RESORB) back into the tree, then drops. Because this runs
+// after the last tick, shed leaves photosynthesize through the whole season first —
+// shedding in fall harvests the canopy's nutrients without forfeiting fall's energy.
+function resolveShedding(state: GameState, shedKeys: Set<string>): GameState {
+  if (shedKeys.size === 0) return state
+  const work = new Map(state.cells)
+  for (const key of shedKeys) {
+    const cell = work.get(key)
+    if (cell?.type !== 'leaf') continue  // already died/dropped during the season
+    depositResorb(work, cell, cell.energy * LEAF_SHED_RESORB)
+    work.delete(key)
+  }
+  return { ...state, cells: work }
+}
+
 // Age every living cell (and deadwood) by one season. Runs once, after the last
 // tick, so a cell committed this season enters its first winter still at age 0.
 function ageCells(state: GameState): GameState {
@@ -463,8 +479,12 @@ function runTick(state: GameState, rng: RNG, weather: SeasonWeather, tick: numbe
 
 // Returns one GameState snapshot per tick (length = weather.rain.length).
 // Soil is pre-expanded once so tick functions never query terrain themselves.
-// Surviving cells age by one season in the final frame.
-export function simulateSeason(state: GameState, rng: RNG, weather: SeasonWeather): GameState[] {
+// At season end, shed leaves resorb + drop, then surviving cells age one season —
+// both folded into the final frame.
+const NO_SHED: ReadonlySet<string> = new Set()
+export function simulateSeason(
+  state: GameState, rng: RNG, weather: SeasonWeather, shedKeys: ReadonlySet<string> = NO_SHED,
+): GameState[] {
   let cur: GameState = { ...state, cells: buildWork(state) }
   const frames: GameState[] = []
   const ticks = weather.rain.length
@@ -472,7 +492,11 @@ export function simulateSeason(state: GameState, rng: RNG, weather: SeasonWeathe
     cur = runTick(cur, rng, weather, tick)
     frames.push(cur)
   }
-  if (frames.length > 0) frames[frames.length - 1] = ageCells(frames[frames.length - 1])
+  if (frames.length > 0) {
+    let last = resolveShedding(frames[frames.length - 1], shedKeys as Set<string>)
+    last = ageCells(last)
+    frames[frames.length - 1] = last
+  }
   return frames
 }
 

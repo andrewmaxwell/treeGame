@@ -50,8 +50,8 @@ export const MILESTONES: Milestone[] = [
   },
   {
     id: 'shed-leaves',
-    goal: 'Shed your leaves before winter',
-    log: 'You drew your canopy back in before the frost.',
+    goal: 'Shed your leaves during fall (tap leaves in Leaf mode)',
+    log: 'You drew your canopy back in for the winter.',
     check: (c) => c.seasonSimulated === 'fall' && c.shedThisTurn,
   },
   {

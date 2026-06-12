@@ -329,6 +329,54 @@ describe('simulateSeason — winter onset', () => {
   })
 })
 
+// ─── fall shedding (resolves at season end) ──────────────────────────────────
+
+describe('simulateSeason — fall shedding', () => {
+  // Root + trunk + a leaf. Shedding the leaf should leave it in place all season
+  // (so it photosynthesizes), then drop it in the final frame, resorbing energy back
+  // into the tree — never removed early (which would forfeit the season's energy).
+  function tree(): Cell[] {
+    return [
+      { q: 0, r: 0,  type: 'tree', water: 6, energy: 5, health: 1, rot: 0, age: 2 },
+      { q: 0, r: -1, type: 'tree', water: 6, energy: 5, health: 1, rot: 0, age: 2 },
+      { q: 0, r: -2, type: 'leaf', water: 6, energy: 5, health: 1, rot: 0, age: 1 },
+    ]
+  }
+
+  it('keeps the shed leaf present until the final frame', () => {
+    const state = makeState(tree())
+    const weather = generateWeather('fall', 2, 99)
+    const shed = new Set([hexKey(0, -2)])
+    const frames = simulateSeason(state, mulberry32(3), weather, shed)
+    // Present mid-season (still working), gone only at the end.
+    expect(frames[30].cells.has(hexKey(0, -2))).toBe(true)
+    expect(frames[frames.length - 1].cells.has(hexKey(0, -2))).toBe(false)
+  })
+
+  it('shedding in fall preserves more energy than letting winter frost take the leaf', () => {
+    const fallW = generateWeather('fall', 2, 99)
+    const winterW = generateWeather('winter', 2, 99)
+    const shedKey = new Set([hexKey(0, -2)])
+    const last = (frames: GameState[]) => frames[frames.length - 1]
+    const bank = (s: GameState) =>
+      [...s.cells.values()].reduce((a, c) => a + (c.type === 'tree' ? c.energy : 0), 0)
+
+    // Path A: shed in fall (75% resorb at fall's end), then winter.
+    const aFall = last(simulateSeason(makeState(tree()), mulberry32(3), fallW, shedKey))
+    const aWinter = last(simulateSeason(aFall, mulberry32(4), winterW))
+
+    // Path B: don't shed; the leaf survives fall, then winter frost drops it at 30%.
+    const bFall = last(simulateSeason(makeState(tree()), mulberry32(3), fallW))
+    const bWinter = last(simulateSeason(bFall, mulberry32(4), winterW))
+
+    expect(aFall.cells.has(hexKey(0, -2))).toBe(false)  // shed at fall's end
+    expect(bFall.cells.has(hexKey(0, -2))).toBe(true)   // kept through fall
+    expect(bWinter.cells.has(hexKey(0, -2))).toBe(false) // frost took it
+    // Higher resorption rate in fall (0.75) beats winter frost (0.30).
+    expect(bank(aWinter)).toBeGreaterThan(bank(bWinter))
+  })
+})
+
 // ─── integration: transpiration suction ──────────────────────────────────────
 
 describe('simulateSeason — transpiration suction (tick-order integration)', () => {

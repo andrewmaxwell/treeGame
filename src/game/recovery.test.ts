@@ -9,7 +9,7 @@ import { generateWeather } from '../sim/weather'
 import { hexKey } from '../sim/grid'
 import { TerrainGen } from '../sim/terrain'
 import {
-  createPlanningState, handleTap, applySeasonAdvance, bankedEnergy, getValidPlacements,
+  createPlanningState, handleTap, applySeasonAdvance, resolvableShedKeys, bankedEnergy, getValidPlacements,
 } from './planning'
 import type { GameState } from './state'
 import type { Cell } from '../sim/cells'
@@ -23,8 +23,9 @@ function seedState(): GameState {
 function advance(game: GameState, plan: (g: GameState, p: ReturnType<typeof createPlanningState>) => ReturnType<typeof createPlanningState>): GameState {
   const w = generateWeather(game.season, game.year, game.worldSeed)
   const pl = plan(game, createPlanningState(bankedEnergy(game.cells)))
+  const shed = resolvableShedKeys(game, pl)
   const committed = applySeasonAdvance(game, pl)
-  const frames = simulateSeason(committed, mulberry32(committed.rngSeed), w)
+  const frames = simulateSeason(committed, mulberry32(committed.rngSeed), w, shed)
   return frames[frames.length - 1]
 }
 
@@ -44,39 +45,66 @@ function reLeaf(game: GameState, pl: ReturnType<typeof createPlanningState>) {
   return pl
 }
 
-describe('multi-year deciduous recovery', () => {
-  it('a re-leafing tree grows its winter reserves year over year (no death spiral)', () => {
-    let game = seedState()
-    const winterBanks: number[] = []
-
-    for (let i = 0; i < 12; i++) {
-      game = advance(game, (g, pl) => {
-        if (g.season === 'spring' && g.year === 1) {
-          // Initial skeleton: roots, trunk, a few leaves.
-          for (const [q, r, m] of [
-            [0, 1, 'branch'], [0, 2, 'branch'], [0, -1, 'branch'], [0, -2, 'branch'],
-            [-1, -2, 'leaf'], [1, -3, 'leaf'], [0, -3, 'leaf'],
-          ] as [number, number, 'branch' | 'leaf'][]) {
-            const res = handleTap(q, r, m, g, pl)
-            if (res.kind === 'placed') pl = res.planning!
-          }
-          return pl
-        }
-        if (g.season === 'spring') return reLeaf(g, pl)
-        return pl
-      })
-
-      if (game.season === 'winter') winterBanks.push(bankedEnergy(game.cells))
+function plant(game: GameState, pl: ReturnType<typeof createPlanningState>): ReturnType<typeof createPlanningState> {
+  if (game.season === 'spring' && game.year === 1) {
+    for (const [q, r, m] of [
+      [0, 1, 'branch'], [0, 2, 'branch'], [0, -1, 'branch'], [0, -2, 'branch'],
+      [-1, -2, 'leaf'], [1, -3, 'leaf'], [0, -3, 'leaf'],
+    ] as [number, number, 'branch' | 'leaf'][]) {
+      const res = handleTap(q, r, m, game, pl)
+      if (res.kind === 'placed') pl = res.planning!
     }
+    return pl
+  }
+  return pl
+}
 
-    // Three winters recorded; each should be safely positive and trending UP — the
-    // tree banks a surplus each year rather than spiralling to zero.
+// Shed every leaf at the start of fall (the strategy the game's milestone instructs).
+function shedAllLeaves(game: GameState, pl: ReturnType<typeof createPlanningState>) {
+  for (const c of game.cells.values()) {
+    if (c.type === 'leaf') {
+      const res = handleTap(c.q, c.r, 'leaf', game, pl)
+      if (res.kind === 'shed_toggled') pl = res.planning!
+    }
+  }
+  return pl
+}
+
+// Play 12 seasons re-leafing each spring; `fallSheds` toggles whether leaves are
+// shed at the start of fall. Returns the three recorded winter banked-energy totals.
+function playThreeYears(fallSheds: boolean): { winterBanks: number[]; alive: boolean } {
+  let game = seedState()
+  const winterBanks: number[] = []
+  for (let i = 0; i < 12; i++) {
+    game = advance(game, (g, pl) => {
+      if (g.season === 'spring' && g.year === 1) return plant(g, pl)
+      if (g.season === 'spring') return reLeaf(g, pl)
+      if (g.season === 'fall' && fallSheds) return shedAllLeaves(g, pl)
+      return pl
+    })
+    if (game.season === 'winter') winterBanks.push(bankedEnergy(game.cells))
+  }
+  return { winterBanks, alive: [...game.cells.values()].some((c) => c.type === 'tree') }
+}
+
+describe('multi-year deciduous recovery', () => {
+  it('keeping leaves through fall: winter reserves grow year over year (no spiral)', () => {
+    const { winterBanks, alive } = playThreeYears(false)
     expect(winterBanks.length).toBe(3)
     for (const b of winterBanks) expect(b).toBeGreaterThan(2)
     expect(winterBanks[1]).toBeGreaterThan(winterBanks[0])
     expect(winterBanks[2]).toBeGreaterThan(winterBanks[1])
+    expect(alive).toBe(true)
+  })
 
-    // And it ends the run alive with a real canopy re-grown after the last spring.
-    expect([...game.cells.values()].some((c) => c.type === 'tree')).toBe(true)
+  it('shedding at the start of fall (the instructed strategy) also thrives', () => {
+    // Regression: shedding used to drop leaves BEFORE fall ran, forfeiting fall's
+    // photosynthesis and starving the tree to a permanent 0-energy dead end. Now shed
+    // leaves work through fall and resorb at season end, so this path grows too.
+    const { winterBanks, alive } = playThreeYears(true)
+    expect(winterBanks.length).toBe(3)
+    for (const b of winterBanks) expect(b).toBeGreaterThan(5)
+    expect(winterBanks[2]).toBeGreaterThan(winterBanks[0])
+    expect(alive).toBe(true)
   })
 })

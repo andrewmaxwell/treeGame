@@ -331,11 +331,17 @@ Define support explicitly:
   back into the tree (`LEAF_SHED_RESORB`, nutrient resorption — what real deciduous
   trees do). Resorption is **proportional to the leaf's actual energy**, not a flat
   amount — this makes the canopy a genuinely *recoverable* energy store, so a tree can
-  re-leaf in spring instead of starving. (Originally a flat 0.5/leaf, which destroyed
-  most banked energy and caused the death spiral above.) NOTE: because a fall-shed
-  resolves before the fall simulation, shedding forfeits that season's photosynthesis
-  — keeping leaves through fall (winter then drops them at 30%) is a valid alternative.
-  A future refinement could resolve shed at *end* of the fall sim so you get both.
+  re-leaf in spring instead of starving.
+- **Shed timing (critical):** a marked leaf is **not** removed when the season is
+  advanced. It photosynthesizes through the entire season and only drops at *season
+  end* (`resolveShedding` in `simulate.ts`, run after the last tick, before aging),
+  resorbing its end-of-season energy. Marking is therefore **budget-neutral during
+  planning** — the energy returns in *next* season's budget, not the current one.
+  Earlier the shed happened at advance, *before* the season ran, which forfeited fall's
+  photosynthesis and starved the tree to a permanent 0-energy dead end even though the
+  in-game milestone tells you to shed. Both "shed in fall" and "keep leaves, let winter
+  frost take them at 30%" are now viable, with fall-shedding the better play. Guarded by
+  `recovery.test.ts` (both strategies grow their winter reserves year over year).
 - **Spring frost** (possible in early years' forecasts, more common later): kills all
   cells placed in the immediately preceding planning phase. The forecast warns of
   frost risk; planting early in a frost-risk spring is a gamble.
