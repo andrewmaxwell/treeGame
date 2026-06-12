@@ -1,0 +1,145 @@
+.hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+/* ── Top bar ─────────────────────────────────────────────────────────────── */
+.topBar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  color: #fff;
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+  pointer-events: auto;
+}
+
+.season { font-weight: 600; letter-spacing: 0.02em; }
+.score  { font-size: 16px; }
+
+/* ── Playback progress bar ───────────────────────────────────────────────── */
+.progressTrack {
+  height: 3px;
+  background: rgba(255, 255, 255, 0.12);
+  pointer-events: none;
+}
+
+.progressBar {
+  height: 100%;
+  background: #4A90D9;
+  transition: width 0.05s linear;
+}
+
+/* ── Bottom bar ──────────────────────────────────────────────────────────── */
+.bottomBar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  pointer-events: auto;
+}
+
+.energy {
+  font-family: system-ui, sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  color: #FFD700;
+  min-width: 60px;
+}
+
+.energyLow {
+  color: #FF5555;
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+
+/* ── Playback state ──────────────────────────────────────────────────────── */
+.playingLabel {
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.6);
+  font-style: italic;
+  flex: 1;
+}
+
+.skipBtn {
+  margin-left: auto;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: system-ui, sans-serif;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.skipBtn:hover { background: rgba(255, 255, 255, 0.25); }
+
+/* ── Mode toggle ─────────────────────────────────────────────────────────── */
+.modeToggle {
+  display: flex;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.modeBtn {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: system-ui, sans-serif;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.6);
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.modeBtn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.modeBtnActive {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+
+/* ── Advance Season button ───────────────────────────────────────────────── */
+.advanceBtn {
+  margin-left: auto;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: system-ui, sans-serif;
+  background: #2d7a3a;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.advanceBtn:hover:not(:disabled) { background: #3a9f4c; }
+
+.advanceBtn:disabled {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.3);
+  cursor: not-allowed;
+}
