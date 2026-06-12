@@ -98,6 +98,24 @@
 }
 .springHint b { color: #fff; }
 
+/* ── Fall reserve warning ─────────────────────────────────────────────────── */
+.reserveHint {
+  align-self: center;
+  margin-top: 8px;
+  max-width: 480px;
+  padding: 7px 16px;
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: center;
+  color: #ffe0c2;
+  background: rgba(120, 70, 30, 0.8);
+  border: 1px solid rgba(225, 160, 90, 0.5);
+  border-radius: 14px;
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+}
+
 /* ── Unspent-energy nudge ─────────────────────────────────────────────────── */
 .nudge {
   align-self: center;

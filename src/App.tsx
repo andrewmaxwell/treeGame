@@ -325,8 +325,20 @@ export function App() {
   // to grow new ones to restart photosynthesis. This is the single most confusing
   // moment for new players, so call it out explicitly.
   const planningSeason = seasonYear.season
-  const leafless = ![...gameRef.current.cells.values()].some((c) => c.type === 'leaf')
+  let leafCount = 0, woodCount = 0
+  for (const c of gameRef.current.cells.values()) {
+    if (c.type === 'leaf') leafCount++
+    else if (c.type === 'tree') woodCount++
+  }
+  const leafless = leafCount === 0
   const springReLeaf = !isPlaying && planningSeason === 'spring' && leafless
+
+  // Fall reserve warning: winter is dormant (no photosynthesis), so the tree survives
+  // on banked energy alone — roughly woodCount × 0.3 to last the season, plus a margin
+  // to re-leaf in spring. If you've drawn your reserves below that, you're spending
+  // toward a hungry winter. Teaches "bank energy before the cold" — only when at risk.
+  const fallReserveHint =
+    !isPlaying && planningSeason === 'fall' && energyRemaining < woodCount * 0.5
 
   // Gentle unspent-energy nudge: early years, growth seasons only (hoarding into
   // fall/winter is correct, so it's suppressed there). Suppressed when the more
@@ -363,6 +375,7 @@ export function App() {
         completedGoals={goalsView.completedCount}
         showNudge={showNudge}
         springReLeaf={springReLeaf}
+        fallReserveHint={fallReserveHint}
         mode={mode}
         canAdvance={canAdvance}
         isPlaying={isPlaying}
