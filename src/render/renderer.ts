@@ -28,6 +28,10 @@ export function drawScene(
   // Light level (0–1) per leaf cell key — drives the per-leaf sun indicator during
   // planning. Empty during playback. Includes staged leaves (prospective shading).
   leafLight: Map<string, number>,
+  // The inspected cell (white outline) and the set of cells a pending prune would
+  // remove (red danger overlay). Both empty/null outside the inspector.
+  inspectedKey: string | null,
+  pruneSet: Set<string>,
 ): void {
   ctx.clearRect(0, 0, width, height)
   ctx.fillStyle = '#1a1a2e'
@@ -156,6 +160,38 @@ export function drawScene(
       drawLeafSun(ctx, sx, sy, r, leafLight.get(key)!)
     }
   }
+
+  // ── Pass 5: prune-removal preview (red) and inspected-cell outline (white) ───
+  if (pruneSet.size > 0) {
+    for (const key of pruneSet) {
+      const p = screenPosForKey(key, camera, width, height)
+      if (!p) continue
+      drawFilledHex(ctx, p.sx, p.sy, r, 'rgba(220,60,60,0.42)', 'rgba(255,90,90,0.95)', Math.max(1, 1.5 * camera.zoom))
+    }
+  }
+  if (inspectedKey) {
+    const p = screenPosForKey(inspectedKey, camera, width, height)
+    if (p) {
+      hexPath(ctx, p.sx, p.sy, r)
+      ctx.strokeStyle = '#ffffff'
+      ctx.lineWidth = Math.max(1.5, 2.5 * camera.zoom)
+      ctx.stroke()
+    }
+  }
+}
+
+// Parse a "q,r" cell key to its on-screen center, or null if off-screen.
+function screenPosForKey(
+  key: string, camera: Camera, width: number, height: number,
+): { sx: number; sy: number } | null {
+  const comma = key.indexOf(',')
+  const q = parseInt(key.slice(0, comma))
+  const r = parseInt(key.slice(comma + 1))
+  const { x: wx, y: wy } = hexToPixel(q, r, BASE_RADIUS)
+  const { sx, sy } = worldToScreen(wx, wy, camera, width, height)
+  const margin = BASE_RADIUS * camera.zoom * 2
+  if (sx < -margin || sx > width + margin || sy < -margin || sy > height + margin) return null
+  return { sx, sy }
 }
 
 // A small sun glyph at a leaf's upper-right, sized and brightened by how much light

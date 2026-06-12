@@ -4,6 +4,15 @@ import { hexKey } from '../sim/grid'
 
 export type Season = 'spring' | 'summer' | 'fall' | 'winter'
 
+// Milestone progress. `completed` holds milestone ids in completion order (drives
+// the goal log); `peakCells` is the largest living-cell count ever reached (some
+// milestones are "high-water-mark" goals that shouldn't un-complete when the tree
+// shrinks back down over winter).
+export interface GoalProgress {
+  completed: string[]
+  peakCells: number
+}
+
 export interface GameState {
   // Live game cells: tree, leaf, flower, fruit, deadwood.
   // Soil and rock are generated lazily by terrain; modified soil cells get
@@ -15,6 +24,7 @@ export interface GameState {
   score: number
   rngSeed: number   // seed used to produce the NEXT season's RNG
   worldSeed: number // stable for the whole run; drives deterministic weather/forecast
+  goals: GoalProgress
 }
 
 export function createInitialState(): GameState {
@@ -37,5 +47,6 @@ export function createInitialState(): GameState {
     cells, terrain, season: 'spring', year: 1, score: 0,
     rngSeed: Math.floor(Math.random() * 0xFFFFFFFF),
     worldSeed: Math.floor(Math.random() * 0xFFFFFFFF),
+    goals: { completed: [], peakCells: 1 },
   }
 }

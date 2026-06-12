@@ -10,6 +10,7 @@ import type { GameState } from './state'
 import { getValidPlacements, type PlanningState, type PlacementMode } from './planning'
 
 const EMPTY_LIGHT = new Map<string, number>()
+const EMPTY_SET = new Set<string>()
 
 export interface GameCanvasHandle {
   requestDraw: () => void
@@ -21,6 +22,8 @@ interface GameCanvasProps {
   planningRef: RefObject<PlanningState>
   modeRef:    RefObject<PlacementMode>
   isPlaying:  boolean
+  inspectedKey: string | null      // cell shown in the inspector (white outline)
+  pruneSet: Set<string>            // cells a pending prune would remove (red overlay)
   onTap: (q: number, r: number) => void
 }
 
@@ -42,13 +45,14 @@ function makeCamera(): Camera {
 }
 
 export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
-  function GameCanvas({ gameRef, planningRef, modeRef, isPlaying, onTap }, ref) {
+  function GameCanvas({ gameRef, planningRef, modeRef, isPlaying, inspectedKey, pruneSet, onTap }, ref) {
     const canvasRef    = useRef<HTMLCanvasElement>(null)
     const cameraRef    = useRef<Camera>(makeCamera())
     const rafRef       = useRef<number>(0)
     const dirtyRef     = useRef(true)
     const cssSizeRef   = useRef({ width: 0, height: 0 })
     const shakeUntilRef = useRef(0)  // performance.now() deadline
+    const inspectRef   = useRef<{ key: string | null; prune: Set<string> }>({ key: null, prune: EMPTY_SET })
 
     const panRef   = useRef({ dragging: false, lastX: 0, lastY: 0, moved: false })
     const pinchRef = useRef({ active: false, lastDist: 0 })
@@ -58,6 +62,13 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
       requestDraw: () => { dirtyRef.current = true },
       triggerShake: () => { shakeUntilRef.current = performance.now() + 350 },
     }), [])
+
+    // Bridge inspector props into the render loop (which reads refs, not props),
+    // and force a redraw whenever the highlight changes.
+    useEffect(() => {
+      inspectRef.current = { key: inspectedKey, prune: pruneSet }
+      dirtyRef.current = true
+    }, [inspectedKey, pruneSet])
 
     // ── Render loop ───────────────────────────────────────────────────────────
     useEffect(() => {
@@ -95,7 +106,9 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
           // During planning, show how much sun each leaf (real + staged) receives
           // under the current season's sun angle, including staged-canopy shading.
           const leafLight = isPlaying ? EMPTY_LIGHT : computePlanningLight(g, p)
-          drawScene(ctx, width, height, drawCam, g.cells, g.terrain, staged, shed, vp, leafLight)
+          const insp = isPlaying ? null : inspectRef.current.key
+          const prune = isPlaying ? EMPTY_SET : inspectRef.current.prune
+          drawScene(ctx, width, height, drawCam, g.cells, g.terrain, staged, shed, vp, leafLight, insp, prune)
         }
       }
 

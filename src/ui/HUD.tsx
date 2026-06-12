@@ -15,7 +15,11 @@ interface HUDProps {
   energyTotal: number
   season: Season
   year: number
+  score: number
   forecast: ForecastDisplay
+  currentGoal: string | null   // current objective text
+  completedGoals: number       // for the goal-log button badge
+  showNudge: boolean           // gentle unspent-energy nudge
   mode: PlacementMode
   canAdvance: boolean
   isPlaying: boolean
@@ -23,6 +27,7 @@ interface HUDProps {
   onModeChange: (m: PlacementMode) => void
   onAdvanceSeason: () => void
   onSkip: () => void
+  onOpenGoals: () => void
 }
 
 const SEASON_LABEL: Record<Season, string> = {
@@ -33,9 +38,10 @@ const SEASON_LABEL: Record<Season, string> = {
 }
 
 export function HUD({
-  energyRemaining, energyTotal, season, year, forecast, mode, canAdvance,
+  energyRemaining, energyTotal, season, year, score, forecast,
+  currentGoal, completedGoals, showNudge, mode, canAdvance,
   isPlaying, playbackProgress,
-  onModeChange, onAdvanceSeason, onSkip,
+  onModeChange, onAdvanceSeason, onSkip, onOpenGoals,
 }: HUDProps) {
   const energy = Math.floor(energyRemaining)
   const total = Math.floor(energyTotal)
@@ -59,13 +65,32 @@ export function HUD({
             Next: {forecast.nextSeasonLabel} · {forecast.nextForecast}
           </span>
         </div>
-        <span className={styles.score}>🌰 0</span>
+        <div className={styles.rightBlock}>
+          <span className={styles.score}>🌰 {score}</span>
+          <button className={styles.goalsBtn} onClick={onOpenGoals} title="Goals achieved">
+            🏅 {completedGoals}
+          </button>
+        </div>
       </div>
+
+      {/* Current objective — always visible during planning */}
+      {!isPlaying && currentGoal && (
+        <button className={styles.goalBar} onClick={onOpenGoals}>
+          <span className={styles.goalIcon}>🎯</span> {currentGoal}
+        </button>
+      )}
 
       {/* Winter planting warning */}
       {!isPlaying && season === 'winter' && (
         <div className={styles.warning}>
           ❄️ Frost ahead — anything you plant now will die at winter's first frost.
+        </div>
+      )}
+
+      {/* Gentle unspent-energy nudge (early years, growth seasons only) */}
+      {!isPlaying && showNudge && (
+        <div className={styles.nudge}>
+          You have energy to spare — grow some roots or leaves before advancing.
         </div>
       )}
 

@@ -40,18 +40,23 @@ export interface PlanningState {
   energyAvailable: number
   // Tracks spending: +1 per staged cell, minus the proportional refund per
   // shed-marked leaf (previews the season-advance refund so the live budget stays
-  // accurate).
+  // accurate). Also includes accrued prune wound-sealing costs.
   energySpent: number
+  // Energy spent sealing prune wounds this planning phase. Pruning itself removes
+  // cells from the game state immediately; this is only the deducted cost, applied
+  // to the surviving tree at season advance.
+  pruneCostAccrued: number
 }
 
 export function createPlanningState(energyAvailable: number): PlanningState {
-  return { stagedCells: new Map(), shedMarked: new Set(), energyAvailable, energySpent: 0 }
+  return { stagedCells: new Map(), shedMarked: new Set(), energyAvailable, energySpent: 0, pruneCostAccrued: 0 }
 }
 
 export type TapKind =
   | 'placed'
   | 'unstaged'
   | 'shed_toggled'
+  | 'inspect'
   | 'rejected_rock'
   | 'rejected_energy'
   | 'rejected_adjacent'
@@ -105,9 +110,9 @@ export function handleTap(
     }
   }
 
-  // 3. Tapped a non-terrain real cell → nothing (inspector comes later in M7)
-  // Soil/rock cells in game.cells are treated as terrain — fall through to step 4.
-  if (realCell && realCell.type !== 'soil' && realCell.type !== 'rock') return { kind: 'noop' }
+  // 3. Tapped a non-terrain real cell (tree/deadwood/flower/fruit; leaves handled
+  // above) → open the inspector. Soil/rock are terrain — fall through to step 4.
+  if (realCell && realCell.type !== 'soil' && realCell.type !== 'rock') return { kind: 'inspect' }
 
   // 4. Empty (or terrain) cell — try to place
 
@@ -284,7 +289,7 @@ export function applySeasonAdvance(game: GameState, planning: PlanningState): Ga
   // would mint energy from nothing every season.
   let shedRefundTotal = 0
   for (const key of shedKeys) shedRefundTotal += shedRefund(game.cells.get(key)!)
-  const netCost = planning.stagedCells.size * CELL_COST - shedRefundTotal
+  const netCost = planning.stagedCells.size * CELL_COST - shedRefundTotal + planning.pruneCostAccrued
 
   // The payers: pre-existing living cells that survive the plan (not shed, not
   // replaced by a staged cell). New cells' starting energy is part of the cost.

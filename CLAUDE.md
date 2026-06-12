@@ -546,11 +546,29 @@ reserves — feeds into that answer.
 ## Save / Load
 
 - Auto-save to localStorage after every season advance
-- Serialize: `{ cells: Cell[], season, year, weatherState, rngSeed, goals, score }`
+- Serialize: `{ cells: Cell[], season, year, rngSeed, worldSeed, goals, score }`
+  (M7: `sim/save.ts`, key `treegame.save.v1`)
 - Persist the RNG seed and state so reloading doesn't reroll the future
-- One save slot; the Memorial clears it
+- **Terrain and weather are NOT serialized** — both are pure deterministic functions
+  (terrain of (q,r); weather of (worldSeed, year, season)), and any soil the sim
+  modified is promoted into `cells`. Persisting `worldSeed` is enough to replay the
+  future identically, so there's no `weatherState` blob.
+- One save slot; the Memorial clears it (Memorial itself is M10)
 - Also keep a tiny persistent "hall of memorials" record (best score, longest life)
   across runs — cheap to store, gives returning players a reason to beat themselves
+  (deferred to M10 with the Memorial)
+
+**M7 implementation notes**
+- Inspector (`ui/Inspector.tsx`) shows type, water, energy, health, rot, age plus a
+  plain-language status line ("Water-stressed", "Low on energy", "Thriving", …) so the
+  color map is legible. **Stress is intentionally absent until M8** adds the support graph.
+- Pruning (`game/prune.ts`) applies immediately to the game state; the wound-sealing
+  cost is accrued on `PlanningState.pruneCostAccrued` and deducted at season advance.
+  Removal set = the cell plus everything that loses root-connectivity (BFS through
+  wood); a whole-canopy sever requires a second confirm.
+- Goals (`game/goals.ts`) reveal one at a time (lowest-index incomplete is the current
+  objective); completion is checked after each season advance and surfaced in the
+  season summary + goal log. Flower/fruit milestones (7–8) can't complete until M10.
 
 ---
 

@@ -24,6 +24,7 @@ function makeState(cells: Cell[]): GameState {
     score: 0,
     rngSeed: 42,
     worldSeed: 99,
+    goals: { completed: [], peakCells: 1 },
   }
 }
 

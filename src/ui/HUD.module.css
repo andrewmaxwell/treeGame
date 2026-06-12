@@ -43,7 +43,55 @@
 .weatherNow  { font-size: 14px; font-weight: 600; }
 .weatherNext { font-size: 11px; color: rgba(255, 255, 255, 0.5); }
 
+.rightBlock { display: flex; align-items: center; gap: 10px; }
 .score  { font-size: 16px; }
+
+.goalsBtn {
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 14px;
+  padding: 3px 10px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.goalsBtn:hover { background: rgba(255, 255, 255, 0.2); }
+
+/* ── Current goal bar ─────────────────────────────────────────────────────── */
+.goalBar {
+  align-self: center;
+  margin-top: 8px;
+  padding: 5px 14px;
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffe9a8;
+  background: rgba(70, 60, 20, 0.7);
+  border: 1px solid rgba(230, 200, 90, 0.4);
+  border-radius: 16px;
+  backdrop-filter: blur(4px);
+  cursor: pointer;
+  pointer-events: auto;
+}
+.goalBar:hover { background: rgba(90, 78, 26, 0.8); }
+.goalIcon { margin-right: 4px; }
+
+/* ── Unspent-energy nudge ─────────────────────────────────────────────────── */
+.nudge {
+  align-self: center;
+  margin-top: 8px;
+  padding: 5px 14px;
+  font-family: system-ui, sans-serif;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 14px;
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+}
 
 /* ── Winter planting warning ─────────────────────────────────────────────── */
 .warning {

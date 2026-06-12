@@ -1,0 +1,107 @@
+/* Floating panel on desktop (bottom-right, above the bottom bar); full-width bottom
+   sheet on narrow/touch screens. */
+.panel {
+  position: absolute;
+  right: 16px;
+  bottom: 72px;
+  width: 250px;
+  background: #20232e;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  padding: 14px 16px;
+  color: #fff;
+  font-family: system-ui, sans-serif;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
+  z-index: 15;
+}
+
+@media (max-width: 560px) {
+  .panel {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    border-radius: 14px 14px 0 0;
+  }
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.title { font-size: 17px; font-weight: 700; }
+
+.close {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.close:hover { color: #fff; }
+
+.status {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.good { color: #7bd07b; }
+.warn { color: #e8c45a; }
+.bad  { color: #ff6b6b; }
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 8px;
+  margin-bottom: 12px;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+}
+.rowLabel { color: rgba(255, 255, 255, 0.5); }
+.rowValue { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.warnLine {
+  font-size: 12px;
+  color: #ff9b6b;
+  margin-bottom: 8px;
+}
+
+.prune {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px;
+  font-size: 14px;
+  font-weight: 700;
+  font-family: system-ui, sans-serif;
+  background: #7a3a3a;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.prune:hover:not(:disabled) { background: #9f4c4c; }
+.pruneDanger { background: #b23b3b; }
+.prune:disabled {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.3);
+  cursor: not-allowed;
+}
+
+.cost { font-size: 12px; opacity: 0.9; }
+.free { font-size: 11px; opacity: 0.7; font-weight: 600; }
