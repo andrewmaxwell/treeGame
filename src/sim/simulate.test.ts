@@ -6,9 +6,10 @@ import {
   photosynthesize,
   updateHealth,
   simulateSeason,
+  runSeason,
 } from './simulate'
 import { mulberry32 } from './rng'
-import { generateWeather } from './weather'
+import { generateWeather, TICKS_PER_SEASON, type SeasonWeather, type StormSeverity } from './weather'
 import { hexKey } from './grid'
 import { TerrainGen, surfaceR } from './terrain'
 import type { GameState } from '../game/state'
@@ -353,27 +354,66 @@ describe('simulateSeason — fall shedding', () => {
     expect(frames[frames.length - 1].cells.has(hexKey(0, -2))).toBe(false)
   })
 
-  it('shedding in fall preserves more energy than letting winter frost take the leaf', () => {
+  it('shedding in fall resorbs more energy than letting the autumn drop take the leaf', () => {
     const fallW = generateWeather('fall', 2, 99)
-    const winterW = generateWeather('winter', 2, 99)
     const shedKey = new Set([hexKey(0, -2)])
     const last = (frames: GameState[]) => frames[frames.length - 1]
     const bank = (s: GameState) =>
       [...s.cells.values()].reduce((a, c) => a + (c.type === 'tree' ? c.energy : 0), 0)
 
-    // Path A: shed in fall (75% resorb at fall's end), then winter.
-    const aFall = last(simulateSeason(makeState(tree()), mulberry32(3), fallW, shedKey))
-    const aWinter = last(simulateSeason(aFall, mulberry32(4), winterW))
+    // The whole canopy now drops at fall's end either way (deciduous): shed-marked
+    // leaves resorb 75%, the rest only 30%. Both leaves photosynthesise all fall first.
+    const aFall = last(simulateSeason(makeState(tree()), mulberry32(3), fallW, shedKey))  // shed
+    const bFall = last(simulateSeason(makeState(tree()), mulberry32(3), fallW))           // kept
 
-    // Path B: don't shed; the leaf survives fall, then winter frost drops it at 30%.
-    const bFall = last(simulateSeason(makeState(tree()), mulberry32(3), fallW))
-    const bWinter = last(simulateSeason(bFall, mulberry32(4), winterW))
+    expect(aFall.cells.has(hexKey(0, -2))).toBe(false)  // canopy is bare entering winter
+    expect(bFall.cells.has(hexKey(0, -2))).toBe(false)  // …whether shed or not
+    // Higher resorption rate (0.75 vs 0.30) leaves more banked in the wood.
+    expect(bank(aFall)).toBeGreaterThan(bank(bFall))
+  })
+})
 
-    expect(aFall.cells.has(hexKey(0, -2))).toBe(false)  // shed at fall's end
-    expect(bFall.cells.has(hexKey(0, -2))).toBe(true)   // kept through fall
-    expect(bWinter.cells.has(hexKey(0, -2))).toBe(false) // frost took it
-    // Higher resorption rate in fall (0.75) beats winter frost (0.30).
-    expect(bank(aWinter)).toBeGreaterThan(bank(bWinter))
+// ─── storms (structural failure) ──────────────────────────────────────────────
+
+describe('simulateSeason — storms', () => {
+  // A clear, dry season carrying a single storm event of the given severity.
+  function stormWeather(severity: StormSeverity): SeasonWeather {
+    return {
+      season: 'spring', year: 2, sunAngleDeg: 20, intensity: 0.7,
+      rain: new Array(TICKS_PER_SEASON).fill(false), isDrought: false,
+      storm: { startTick: 3, ticks: 2, severity },
+    }
+  }
+
+  // Root + vertical trunk + a long horizontal cantilever far above ground (r=-5, so
+  // above the surface for every q here). The one-sided bending moment makes the trunk
+  // junction very over-stressed (well past the minor threshold) — easy storm bait.
+  function cantilever(): Cell[] {
+    const list: Cell[] = []
+    for (let r = 0; r >= -5; r--) list.push(mkCell(0, r, 'tree'))      // root + trunk
+    for (let q = 1; q <= 8; q++) list.push(mkCell(q, -5, 'tree'))      // long horizontal arm
+    return list
+  }
+
+  it('a minor storm snaps an over-stressed cantilever and the orphaned wood falls', () => {
+    const before = cantilever().length
+    const { frames, storms } = runSeason(makeState(cantilever()), mulberry32(2), stormWeather('minor'))
+    const woodLeft = [...frames[frames.length - 1].cells.values()].filter((c) => c.type === 'tree').length
+    expect(storms.length).toBeGreaterThan(0)
+    expect(storms.reduce((a, s) => a + s.cellsLost, 0)).toBeGreaterThan(0)
+    expect(woodLeft).toBeLessThan(before)   // cells were lost to the wind
+  })
+
+  it('the root system always survives — a tree blows down, it is not uprooted', () => {
+    const { frames } = runSeason(makeState(cantilever()), mulberry32(2), stormWeather('severe'))
+    // (0,0) is underground (surfaceR(0)=0): roots never snap.
+    expect(frames[frames.length - 1].cells.get(hexKey(0, 0))?.type).toBe('tree')
+  })
+
+  it('a sturdy compact tree shrugs off a minor storm (no breaks)', () => {
+    const sturdy = [mkCell(0, 0, 'tree'), mkCell(0, -1, 'tree')]
+    const { storms } = runSeason(makeState(sturdy), mulberry32(2), stormWeather('minor'))
+    expect(storms.length).toBe(0)
   })
 })
 

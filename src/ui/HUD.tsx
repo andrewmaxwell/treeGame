@@ -20,8 +20,9 @@ interface HUDProps {
   currentGoal: string | null   // current objective text
   completedGoals: number       // for the goal-log button badge
   showNudge: boolean           // gentle unspent-energy nudge
-  springReLeaf: boolean        // spring + no leaves → prompt to regrow the canopy
+  springReLeaf: boolean        // spring + leaves actually dropped → prompt to regrow
   fallReserveHint: boolean     // fall + low reserves → warn to bank energy for winter
+  shedInfo: { count: number; energy: number } | null  // fall: feedback on marked-shed leaves
   mode: PlacementMode
   canAdvance: boolean
   isPlaying: boolean
@@ -30,6 +31,8 @@ interface HUDProps {
   onAdvanceSeason: () => void
   onSkip: () => void
   onOpenGoals: () => void
+  onNewGame: () => void
+  onHelp: () => void
 }
 
 const SEASON_LABEL: Record<Season, string> = {
@@ -41,9 +44,9 @@ const SEASON_LABEL: Record<Season, string> = {
 
 export function HUD({
   energyRemaining, energyTotal, season, year, score, forecast,
-  currentGoal, completedGoals, showNudge, springReLeaf, fallReserveHint, mode, canAdvance,
+  currentGoal, completedGoals, showNudge, springReLeaf, fallReserveHint, shedInfo, mode, canAdvance,
   isPlaying, playbackProgress,
-  onModeChange, onAdvanceSeason, onSkip, onOpenGoals,
+  onModeChange, onAdvanceSeason, onSkip, onOpenGoals, onNewGame, onHelp,
 }: HUDProps) {
   const energy = Math.floor(energyRemaining)
   const total = Math.floor(energyTotal)
@@ -72,6 +75,8 @@ export function HUD({
           <button className={styles.goalsBtn} onClick={onOpenGoals} title="Goals achieved">
             🏅 {completedGoals}
           </button>
+          <button className={styles.iconBtn} onClick={onHelp} title="How to play">?</button>
+          <button className={styles.iconBtn} onClick={onNewGame} title="Plant a new seed (restart)">⟳</button>
         </div>
       </div>
 
@@ -82,34 +87,6 @@ export function HUD({
         </button>
       )}
 
-      {/* Winter planting warning */}
-      {!isPlaying && season === 'winter' && (
-        <div className={styles.warning}>
-          ❄️ Frost ahead — anything you plant now will die at winter's first frost.
-        </div>
-      )}
-
-      {/* Spring re-leaf guidance — the deciduous cycle's most confusing moment */}
-      {!isPlaying && springReLeaf && (
-        <div className={styles.springHint}>
-          🌱 Spring! Your leaves dropped over winter — switch to <b>Leaf</b> mode and grow a new canopy to restart photosynthesis.
-        </div>
-      )}
-
-      {/* Fall: warn against overspending before the dormant winter */}
-      {!isPlaying && fallReserveHint && (
-        <div className={styles.reserveHint}>
-          🍂 Winter ahead is dormant — your tree lives on banked energy until spring. Keep some in reserve; don't spend it all now.
-        </div>
-      )}
-
-      {/* Gentle unspent-energy nudge (early years, growth seasons only) */}
-      {!isPlaying && showNudge && (
-        <div className={styles.nudge}>
-          You have energy to spare — grow some roots or leaves before advancing.
-        </div>
-      )}
-
       {/* Playback progress bar — only visible during simulation */}
       {isPlaying && (
         <div className={styles.progressTrack}>
@@ -118,45 +95,84 @@ export function HUD({
       )}
       </div>
 
-      {/* Bottom bar */}
-      <div className={styles.bottomBar}>
-        {isPlaying ? (
-          <>
-            <span className={styles.playingLabel}>Simulating…</span>
-            <button className={styles.skipBtn} onClick={onSkip}>Skip →</button>
-          </>
-        ) : (
-          <>
-            <span className={`${styles.energy} ${energyLow ? styles.energyLow : ''}`}>
-              ⚡ {energy} / {total}
-            </span>
-
-            <div className={styles.modeToggle}>
-              <button
-                className={`${styles.modeBtn} ${mode === 'branch' ? styles.modeBtnActive : ''}`}
-                onClick={() => onModeChange('branch')}
-                title="Grow woody cells: roots below ground, trunk/branches above"
-              >
-                Wood
-              </button>
-              <button
-                className={`${styles.modeBtn} ${mode === 'leaf' ? styles.modeBtnActive : ''}`}
-                onClick={() => onModeChange('leaf')}
-              >
-                Leaf
-              </button>
-            </div>
-
-            <button
-              className={styles.advanceBtn}
-              onClick={onAdvanceSeason}
-              disabled={!canAdvance}
-              title={canAdvance ? undefined : 'Fix disconnected growth first'}
-            >
-              Advance Season →
-            </button>
-          </>
+      {/* Bottom group — contextual hints sit just above the controls, off the tree */}
+      <div className={styles.bottomGroup}>
+        {/* Winter planning guidance */}
+        {!isPlaying && season === 'winter' && (
+          <div className={styles.warning}>
+            ❄️ Winter is for pruning &amp; reshaping — new growth dies at frost. Tidy up if you like, then just <b>Advance Season</b> to ride out the cold.
+          </div>
         )}
+
+        {/* Spring re-leaf guidance — only when leaves actually dropped over winter */}
+        {!isPlaying && springReLeaf && (
+          <div className={styles.springHint}>
+            🌱 Your leaves dropped over winter. Switch to <b>Leaf</b> mode and grow a new canopy to restart photosynthesis.
+          </div>
+        )}
+
+        {/* Fall: warn against overspending before the dormant winter */}
+        {!isPlaying && fallReserveHint && (
+          <div className={styles.reserveHint}>
+            🍂 Winter ahead is dormant — your tree lives on banked energy until spring. Keep some in reserve.
+          </div>
+        )}
+
+        {/* Fall: shedding feedback — make the resorption benefit visible */}
+        {!isPlaying && shedInfo && shedInfo.count > 0 && (
+          <div className={styles.shedHint}>
+            🍂 Shedding {shedInfo.count} {shedInfo.count === 1 ? 'leaf' : 'leaves'} now banks ~{Math.round(shedInfo.energy)} energy for spring. Left on, winter frost wastes most of it.
+          </div>
+        )}
+
+        {/* Gentle unspent-energy nudge (early years, growth seasons only) */}
+        {!isPlaying && showNudge && (
+          <div className={styles.nudge}>
+            You have energy to spare — grow some roots or leaves before advancing.
+          </div>
+        )}
+
+        {/* Bottom bar */}
+        <div className={styles.bottomBar}>
+          {isPlaying ? (
+            <>
+              <span className={styles.playingLabel}>Simulating…</span>
+              <button className={styles.skipBtn} onClick={onSkip}>Skip →</button>
+            </>
+          ) : (
+            <>
+              <span className={`${styles.energy} ${energyLow ? styles.energyLow : ''}`}>
+                ⚡ {energy} / {total}
+              </span>
+
+              <div className={styles.modeToggle}>
+                <button
+                  className={`${styles.modeBtn} ${mode === 'branch' ? styles.modeBtnActive : ''}`}
+                  onClick={() => onModeChange('branch')}
+                  title="Grow woody cells: roots below ground, trunk/branches above"
+                >
+                  {mode === 'branch' ? '● ' : ''}Wood
+                </button>
+                <button
+                  className={`${styles.modeBtn} ${mode === 'leaf' ? styles.modeBtnActive : ''}`}
+                  onClick={() => onModeChange('leaf')}
+                  title="Grow leaves above ground (they photosynthesize)"
+                >
+                  {mode === 'leaf' ? '● ' : ''}Leaf
+                </button>
+              </div>
+
+              <button
+                className={styles.advanceBtn}
+                onClick={onAdvanceSeason}
+                disabled={!canAdvance}
+                title={canAdvance ? undefined : 'Fix disconnected growth first'}
+              >
+                Advance Season →
+              </button>
+            </>
+          )}
+        </div>
       </div>
     </div>
   )

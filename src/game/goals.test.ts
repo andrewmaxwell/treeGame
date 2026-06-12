@@ -24,6 +24,9 @@ function ctx(over: Partial<GoalContext>): GoalContext {
     yearSimulated: over.yearSimulated ?? 1,
     shedThisTurn: over.shedThisTurn ?? false,
     score: over.score ?? 0,
+    droughtThisSeason: over.droughtThisSeason ?? false,
+    stormThisSeason: over.stormThisSeason ?? false,
+    stormCellsLost: over.stormCellsLost ?? 0,
   }
 }
 
@@ -77,6 +80,25 @@ describe('evaluateGoals', () => {
     const c = cells([cell(0, r, 'tree')])
     expect(evaluateGoals(fresh, ctx({ cells: c, livingCells: 1 }))
       .newlyCompleted.map((m) => m.id)).toContain('deep-root')
+  })
+
+  it('survive-drought fires only when a drought season is survived', () => {
+    expect(evaluateGoals(fresh, ctx({ droughtThisSeason: false, livingCells: 3 }))
+      .newlyCompleted.map((m) => m.id)).not.toContain('survive-drought')
+    expect(evaluateGoals(fresh, ctx({ droughtThisSeason: true, livingCells: 3 }))
+      .newlyCompleted.map((m) => m.id)).toContain('survive-drought')
+  })
+
+  it('survive-storm fires only on a storm season with zero cells lost', () => {
+    // A storm that snapped cells does NOT complete the clean-survival goal.
+    expect(evaluateGoals(fresh, ctx({ stormThisSeason: true, stormCellsLost: 4, livingCells: 3 }))
+      .newlyCompleted.map((m) => m.id)).not.toContain('survive-storm')
+    // No storm at all → no completion.
+    expect(evaluateGoals(fresh, ctx({ stormThisSeason: false, stormCellsLost: 0, livingCells: 3 }))
+      .newlyCompleted.map((m) => m.id)).not.toContain('survive-storm')
+    // A storm weathered without a single loss → completes.
+    expect(evaluateGoals(fresh, ctx({ stormThisSeason: true, stormCellsLost: 0, livingCells: 3 }))
+      .newlyCompleted.map((m) => m.id)).toContain('survive-storm')
   })
 })
 

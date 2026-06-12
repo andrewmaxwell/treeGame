@@ -4,7 +4,9 @@ import { hexKey, HEX_NEIGHBORS } from './grid'
 import { surfaceR } from './terrain'
 import type { RNG } from './rng'
 import { mulberry32 } from './rng'
-import type { SeasonWeather } from './weather'
+import type { SeasonWeather, StormSeverity } from './weather'
+import { STORM_THRESHOLD } from './weather'
+import { computeStructure, applyBreakage } from './structure'
 import type { GameState } from '../game/state'
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -369,6 +371,30 @@ export function updateHealth(state: GameState): GameState {
 // Stub: rot spread (Milestone 9)
 function spreadRot(state: GameState, _rng: RNG): GameState { return state }
 
+// Storm structural-failure check (one storm tick). Every above-ground wood cell whose
+// stress exceeds the storm's threshold has a 50% chance to snap (so identical trees
+// don't always fail identically). Snapped wood plus everything it was holding up — no
+// longer root-connected — falls. Roots (underground) don't snap: a tree blows down at
+// the trunk, it isn't uprooted. Returns the new state and how many cells were lost.
+function applyStorm(state: GameState, rng: RNG, severity: StormSeverity): { state: GameState; cellsLost: number } {
+  const threshold = STORM_THRESHOLD[severity]
+  const { stress } = computeStructure(state.cells)
+
+  const snapped = new Set<string>()
+  for (const [key, cell] of state.cells) {
+    if (cell.type !== 'tree' && cell.type !== 'deadwood') continue
+    if (cell.r >= surfaceR(cell.q)) continue  // underground roots hold
+    const s = stress.get(key)
+    if (s !== undefined && s > threshold && rng() < 0.5) snapped.add(key)
+  }
+  if (snapped.size === 0) return { state, cellsLost: 0 }
+
+  const removed = applyBreakage(state.cells, snapped)
+  const work = new Map(state.cells)
+  for (const k of removed) work.delete(k)
+  return { state: { ...state, cells: work }, cellsLost: removed.size }
+}
+
 // Soil update: rain deposition, evaporation, and the deep water table.
 // Rain falls only on rain ticks (into the top 3–4 rows); evaporation rate is
 // seasonal and amplified by drought; the water table at depth ≥ 18 always regens.
@@ -392,11 +418,11 @@ function updateSoil(state: GameState, weather: SeasonWeather, tick: number): Gam
   return { ...state, cells: work }
 }
 
-// Winter onset (first tick of winter): every leaf drops — the deciduous reset — and
-// any growth placed during the winter planning phase (age 0) is killed by frost.
-// Flowers/fruit also drop, though none normally survive into winter. A leaf you
-// never shed still resorbs a small fraction of its energy back into the tree (a
-// player who sheds in fall recovers far more — see LEAF_SHED_RESORB).
+// Winter onset (first tick of winter): kills any growth placed during the winter
+// planning phase (age 0). The canopy itself normally came down at fall's end (see
+// resolveAutumnDrop), so entering winter the tree is already bare — but this stays a
+// backstop: any leaf/flower/fruit still present at winter onset drops here too (a leaf
+// resorbing the low frost fraction).
 function winterFrost(state: GameState): GameState {
   const work = new Map(state.cells)
   for (const [key, cell] of state.cells) {
@@ -427,10 +453,10 @@ function depositResorb(work: Map<string, Cell>, leaf: Cell, amount: number): voi
   }
 }
 
-// Resolve fall shedding at SEASON END: each still-present shed leaf resorbs most of
-// its energy (LEAF_SHED_RESORB) back into the tree, then drops. Because this runs
-// after the last tick, shed leaves photosynthesize through the whole season first —
-// shedding in fall harvests the canopy's nutrients without forfeiting fall's energy.
+// Resolve shedding at SEASON END for a NON-fall season: each still-present shed leaf
+// resorbs most of its energy (LEAF_SHED_RESORB) back into the tree, then drops. (Marking
+// leaves outside fall is unusual but allowed.) Because this runs after the last tick,
+// shed leaves photosynthesize the whole season first.
 function resolveShedding(state: GameState, shedKeys: Set<string>): GameState {
   if (shedKeys.size === 0) return state
   const work = new Map(state.cells)
@@ -438,6 +464,26 @@ function resolveShedding(state: GameState, shedKeys: Set<string>): GameState {
     const cell = work.get(key)
     if (cell?.type !== 'leaf') continue  // already died/dropped during the season
     depositResorb(work, cell, cell.energy * LEAF_SHED_RESORB)
+    work.delete(key)
+  }
+  return { ...state, cells: work }
+}
+
+// The deciduous drop, resolved at the END of FALL: the WHOLE canopy comes down. Leaves
+// the player marked to shed resorb LEAF_SHED_RESORB (75%); the rest resorb only
+// LEAF_FROST_RESORB (30%) — so shedding is always the better play, and now visibly so.
+// Either way the leaves photosynthesized all fall first (this runs after the last tick).
+//
+// Crucially the canopy drops HERE, entering winter, not at winter's first tick. So the
+// winter planning budget already reflects the tree's true overwintering reserves — no
+// phantom leaf energy that is about to vanish to frost (which read like a bug: "13 in
+// winter, 3 in spring"). Winter is now honestly a bare-tree, live-on-reserves season.
+function resolveAutumnDrop(state: GameState, shedKeys: Set<string>): GameState {
+  const work = new Map(state.cells)
+  for (const [key, cell] of state.cells) {
+    if (cell.type !== 'leaf') continue
+    const rate = shedKeys.has(key) ? LEAF_SHED_RESORB : LEAF_FROST_RESORB
+    depositResorb(work, cell, cell.energy * rate)
     work.delete(key)
   }
   return { ...state, cells: work }
@@ -456,7 +502,20 @@ function ageCells(state: GameState): GameState {
 
 // ─── tick & season ────────────────────────────────────────────────────────────
 
-function runTick(state: GameState, rng: RNG, weather: SeasonWeather, tick: number): GameState {
+// A storm break recorded during playback: which frame it landed on, how many cells
+// fell, and the severity (for the highlight banner + summary line).
+export interface StormBreak {
+  frame: number
+  cellsLost: number
+  severity: StormSeverity
+}
+
+interface TickResult {
+  state: GameState
+  break?: { cellsLost: number; severity: StormSeverity }
+}
+
+function runTick(state: GameState, rng: RNG, weather: SeasonWeather, tick: number): TickResult {
   let s = state
   // Winter onset frost happens before anything else on the first tick.
   if (tick === 0 && weather.season === 'winter') s = winterFrost(s)
@@ -474,30 +533,58 @@ function runTick(state: GameState, rng: RNG, weather: SeasonWeather, tick: numbe
   s = updateHealth(s)
   s = spreadRot(s, rng)
   s = updateSoil(s, weather, tick)
-  return s
+
+  // Event check (tick order step 10): storm structural failure on its event ticks.
+  let brk: TickResult['break']
+  const storm = weather.storm
+  if (storm && tick >= storm.startTick && tick < storm.startTick + storm.ticks) {
+    const r = applyStorm(s, rng, storm.severity)
+    s = r.state
+    if (r.cellsLost > 0) brk = { cellsLost: r.cellsLost, severity: storm.severity }
+  }
+
+  return { state: s, break: brk }
 }
 
-// Returns one GameState snapshot per tick (length = weather.rain.length).
-// Soil is pre-expanded once so tick functions never query terrain themselves.
-// At season end, shed leaves resorb + drop, then surviving cells age one season —
-// both folded into the final frame.
+// One simulated season: a GameState snapshot per tick plus the storm breaks that
+// occurred (for the playback highlight + summary). Soil is pre-expanded once so tick
+// functions never query terrain themselves. At season end, shed leaves resorb + drop,
+// then surviving cells age one season — both folded into the final frame.
+export interface SeasonPlayback {
+  frames: GameState[]
+  storms: StormBreak[]
+}
+
 const NO_SHED: ReadonlySet<string> = new Set()
-export function simulateSeason(
+export function runSeason(
   state: GameState, rng: RNG, weather: SeasonWeather, shedKeys: ReadonlySet<string> = NO_SHED,
-): GameState[] {
+): SeasonPlayback {
   let cur: GameState = { ...state, cells: buildWork(state) }
   const frames: GameState[] = []
+  const storms: StormBreak[] = []
   const ticks = weather.rain.length
   for (let tick = 0; tick < ticks; tick++) {
-    cur = runTick(cur, rng, weather, tick)
+    const res = runTick(cur, rng, weather, tick)
+    cur = res.state
     frames.push(cur)
+    if (res.break) storms.push({ frame: tick, ...res.break })
   }
   if (frames.length > 0) {
-    let last = resolveShedding(frames[frames.length - 1], shedKeys as Set<string>)
+    // Fall: the whole canopy drops (deciduous). Any other season: only stray shed marks.
+    let last = weather.season === 'fall'
+      ? resolveAutumnDrop(frames[frames.length - 1], shedKeys as Set<string>)
+      : resolveShedding(frames[frames.length - 1], shedKeys as Set<string>)
     last = ageCells(last)
     frames[frames.length - 1] = last
   }
-  return frames
+  return { frames, storms }
+}
+
+// Frames-only convenience wrapper — the shape the simulation tests assert against.
+export function simulateSeason(
+  state: GameState, rng: RNG, weather: SeasonWeather, shedKeys: ReadonlySet<string> = NO_SHED,
+): GameState[] {
+  return runSeason(state, rng, weather, shedKeys).frames
 }
 
 export { mulberry32 }

@@ -32,6 +32,9 @@ export function drawScene(
   // remove (red danger overlay). Both empty/null outside the inspector.
   inspectedKey: string | null,
   pruneSet: Set<string>,
+  // Per wood-cell stress (load/strength). Cells over STRESS_WARN get a red tint — a
+  // standing early warning and a live preview of staged growth's structural cost.
+  stress: Map<string, number>,
 ): void {
   ctx.clearRect(0, 0, width, height)
   ctx.fillStyle = '#1a1a2e'
@@ -89,6 +92,7 @@ export function drawScene(
       drawShedX(ctx, sx, sy, r)
     } else {
       drawFilledHex(ctx, sx, sy, r, cellColor(cell), 'rgba(255,255,255,0.55)', 1.5)
+      drawStressTint(ctx, sx, sy, r, stress.get(key))
       if (cell.type === 'leaf' && leafLight.has(key)) {
         drawLeafSun(ctx, sx, sy, r, leafLight.get(key)!)
       }
@@ -104,9 +108,16 @@ export function drawScene(
       const { x: wx, y: wy } = hexToPixel(vq, vr, BASE_RADIUS)
       const { sx, sy } = worldToScreen(wx, wy, camera, width, height)
       if (sx < -r * 2 || sx > width + r * 2 || sy < -r * 2 || sy > height + r * 2) continue
-      const fill   = vpType === 'leaf' ? 'rgba(76,175,80,0.09)'   : 'rgba(160,115,65,0.09)'
-      const stroke = vpType === 'leaf' ? 'rgba(76,175,80,0.28)'   : 'rgba(180,130,80,0.28)'
-      drawFilledHex(ctx, sx, sy, r, fill, stroke, Math.max(0.5, camera.zoom))
+      // Kept very subtle: a faint dotted hint of where growth may go, not a solid grid.
+      const stroke = vpType === 'leaf' ? 'rgba(120,200,120,0.22)' : 'rgba(190,150,100,0.20)'
+      hexPath(ctx, sx, sy, r * 0.92)
+      ctx.fillStyle = vpType === 'leaf' ? 'rgba(76,175,80,0.04)' : 'rgba(160,115,65,0.04)'
+      ctx.fill()
+      ctx.strokeStyle = stroke
+      ctx.lineWidth = Math.max(0.5, camera.zoom)
+      ctx.setLineDash([Math.max(1.5, 2 * camera.zoom), Math.max(2, 3 * camera.zoom)])
+      ctx.stroke()
+      ctx.setLineDash([])
     }
   }
 
@@ -152,12 +163,13 @@ export function drawScene(
     ctx.restore()
 
     // Sun indicators on staged leaves — preview how much light a planned leaf would
-    // get given the (real + staged) canopy above it.
+    // get given the (real + staged) canopy above it. Stress tint previews how much
+    // structural strain the planned wood would add before the player confirms.
     for (const [key, cell] of stagedCells) {
-      if (cell.type !== 'leaf' || !leafLight.has(key)) continue
       const { x: wx, y: wy } = hexToPixel(cell.q, cell.r, BASE_RADIUS)
       const { sx, sy } = worldToScreen(wx, wy, camera, width, height)
-      drawLeafSun(ctx, sx, sy, r, leafLight.get(key)!)
+      drawStressTint(ctx, sx, sy, r, stress.get(key))
+      if (cell.type === 'leaf' && leafLight.has(key)) drawLeafSun(ctx, sx, sy, r, leafLight.get(key)!)
     }
   }
 
@@ -226,6 +238,20 @@ function drawLeafSun(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: n
   // disc
   ctx.beginPath()
   ctx.arc(x, y, disc, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+}
+
+// Subtle red overlay on an over-stressed wood cell, deepening with stress beyond the
+// 0.8 warning line and saturating around the minor-storm threshold (1.2). Cells under
+// the warning line (or with no stress entry) draw nothing.
+const STRESS_WARN = 0.8
+function drawStressTint(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, stress: number | undefined): void {
+  if (stress === undefined || stress <= STRESS_WARN) return
+  const alpha = Math.min(0.38, 0.08 + (stress - STRESS_WARN) * 0.5)
+  ctx.save()
+  hexPath(ctx, cx, cy, r)
+  ctx.fillStyle = `rgba(220,40,40,${alpha})`
   ctx.fill()
   ctx.restore()
 }

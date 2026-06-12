@@ -31,6 +31,27 @@ export const SEASON_MONTHS: Record<Season, string> = {
   winter: 'Dec–Feb',
 }
 
+// Storm severity → the stress threshold above which cells snap (CLAUDE.md). A lower
+// threshold means weaker cells break, so severe storms fell far more of the tree.
+export type StormSeverity = 'minor' | 'moderate' | 'severe'
+export const STORM_THRESHOLD: Record<StormSeverity, number> = {
+  minor: 1.2, moderate: 0.9, severe: 0.6,
+}
+
+// A storm is a 1–2 tick event whose ticks run a structural-failure check. Deterministic
+// from (season, year, worldSeed) like everything else, so the forecast never lies.
+export interface Storm {
+  startTick: number
+  ticks: number          // 1 or 2
+  severity: StormSeverity
+}
+
+// Per-season storm probability (CLAUDE.md "Storm chance": medium spring/fall, low
+// summer/winter). Storms are disabled before Year 2 (difficulty curve).
+const STORM_CHANCE: Record<Season, number> = {
+  spring: 0.35, summer: 0.10, fall: 0.35, winter: 0.10,
+}
+
 // The fully-resolved weather for a single season. Deterministic from
 // (season, year, worldSeed) so the forecast for an upcoming season is identical to
 // what will actually be simulated when the player reaches it.
@@ -41,6 +62,7 @@ export interface SeasonWeather {
   intensity: number
   rain: boolean[]      // length TICKS_PER_SEASON; true on ticks where rain falls
   isDrought: boolean
+  storm: Storm | null  // null when no storm this season
 }
 
 // A stable per-season RNG: the run's worldSeed mixed with the year and season index.
@@ -81,7 +103,23 @@ export function generateWeather(season: Season, year: number, worldSeed: number)
     }
   }
 
-  return { season, year, sunAngleDeg: p.sunAngleDeg, intensity: p.intensity, rain, isDrought }
+  // Storms roll LAST so adding them never perturbs the drought/rain draws above —
+  // existing forecasts stay byte-identical. Enabled from Year 2; severity scales with
+  // the difficulty curve (severe storms only from Year 9). Placed away from tick 0
+  // (which winter reserves for the frost reset) and from the season's tail.
+  let storm: Storm | null = null
+  if (year >= 2 && rng() < STORM_CHANCE[season]) {
+    const sevRoll = rng()
+    let severity: StormSeverity
+    if (year >= 9)      severity = sevRoll < 0.4 ? 'moderate' : sevRoll < 0.75 ? 'minor' : 'severe'
+    else if (year >= 4) severity = sevRoll < 0.5 ? 'minor' : 'moderate'
+    else                severity = sevRoll < 0.75 ? 'minor' : 'moderate'
+    const ticks = rng() < 0.5 ? 2 : 1
+    const startTick = 6 + Math.floor(rng() * (TICKS_PER_SEASON - 12))
+    storm = { startTick, ticks, severity }
+  }
+
+  return { season, year, sunAngleDeg: p.sunAngleDeg, intensity: p.intensity, rain, isDrought, storm }
 }
 
 export function rainTickCount(w: SeasonWeather): number {
@@ -107,7 +145,11 @@ export interface WeatherHeadline {
 // A short icon + label for a season's conditions — used both for the exact
 // "this season" readout and the greyed "next season" forecast.
 export function weatherHeadline(w: SeasonWeather): WeatherHeadline {
+  // A severe storm always headlines (CLAUDE.md: severe storms must show in the
+  // forecast); otherwise a drought's water story leads, with milder storms after.
+  if (w.storm?.severity === 'severe') return { icon: '⛈️', label: 'Severe storm' }
   if (w.isDrought) return { icon: '🌵', label: 'Drought' }
+  if (w.storm) return { icon: '⛈️', label: 'Storms likely' }
   if (w.season === 'winter') return { icon: '❄️', label: 'Frost' }
   const ticks = rainTickCount(w)
   if (ticks >= 18) return { icon: '🌧️', label: 'Wet' }

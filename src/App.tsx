@@ -20,7 +20,9 @@ import {
 import { buildSeasonSummary, type SeasonSummaryData } from './game/summary'
 import { evaluateGoals, currentGoal, completedMilestones, type GoalContext } from './game/goals'
 import { computeRemovalSet, pruneCost, seversWholeCanopy } from './game/prune'
-import { loadGame, saveGame } from './game/save'
+import { loadGame, saveGame, clearSave } from './game/save'
+import { LEAF_SHED_RESORB } from './sim/cells'
+import { Intro } from './ui/Intro'
 import {
   generateWeather,
   weatherHeadline,
@@ -29,7 +31,8 @@ import {
   SEASON_MONTHS,
   type SeasonWeather,
 } from './sim/weather'
-import { simulateSeason, mulberry32 } from './sim/simulate'
+import { runSeason, mulberry32, type StormBreak } from './sim/simulate'
+import { computeStructure } from './sim/structure'
 import { hexKey } from './sim/grid'
 import type { Cell } from './sim/cells'
 import './App.css'
@@ -47,6 +50,7 @@ interface InspectState {
   pruneSet: Set<string>
   cost: number
   severs: boolean
+  stress?: number   // structural stress for wood cells (undefined for terminals/terrain)
 }
 
 // Build the HUD's forecast block for the season the player is currently planning.
@@ -84,6 +88,8 @@ function countLiving(cells: Map<string, Cell>): number {
 
 const TICKS_PER_SECOND = 12
 const MS_PER_TICK = 1000 / TICKS_PER_SECOND
+// Playback holds this long when a storm snaps cells, so the break registers.
+const STORM_PAUSE_MS = 900
 
 export function App() {
   // Resume a saved run if one exists, else start fresh. The useState lazy initializer
@@ -109,10 +115,17 @@ export function App() {
   const [goalsView, setGoalsView]      = useState<GoalsView>(() => goalsViewOf(gameRef.current))
   const [goalLogOpen, setGoalLogOpen]  = useState(false)
   const [inspected, setInspected]      = useState<InspectState | null>(null)
+  const [stormFlash, setStormFlash]    = useState<string | null>(null)
+  const [shedInfo, setShedInfo]        = useState<{ count: number; energy: number } | null>(null)
+  const [showIntro, setShowIntro]      = useState(() => {
+    try { return localStorage.getItem('treegame.introSeen') == null } catch { return false }
+  })
 
   // Captured at advance time so finishPlayback can diff committed→final for the
   // season summary and evaluate goals once the final state is known.
-  const summaryInputRef = useRef<{ committed: GameState; weather: SeasonWeather; shedThisTurn: boolean } | null>(null)
+  const summaryInputRef = useRef<{
+    committed: GameState; weather: SeasonWeather; shedThisTurn: boolean; storms: StormBreak[]
+  } | null>(null)
 
   // Keep a ref to mode so the tap handler always sees the current value
   const modeRef = useRef<PlacementMode>('branch')
@@ -124,6 +137,9 @@ export function App() {
     frameIdx: number
     lastTime: number
     rafId: number
+    storms: StormBreak[]
+    nextStorm: number     // index of the next storm break not yet highlighted
+    pauseUntil: number    // performance.now() deadline; playback holds for a beat on a break
   } | null>(null)
 
   const finishPlayback = useCallback((finalState: GameState) => {
@@ -141,6 +157,7 @@ export function App() {
     let newlyCompletedLogs: string[] = []
     let nextGoals = finalState.goals
     if (si) {
+      const stormCellsLost = si.storms.reduce((a, s) => a + s.cellsLost, 0)
       const ctx: GoalContext = {
         cells: finalState.cells,
         livingCells,
@@ -149,6 +166,9 @@ export function App() {
         yearSimulated: si.weather.year,
         shedThisTurn: si.shedThisTurn,
         score: finalState.score,
+        droughtThisSeason: si.weather.isDrought,
+        stormThisSeason: si.weather.storm != null,
+        stormCellsLost,
       }
       const result = evaluateGoals(finalState.goals, ctx)
       nextGoals = result.progress
@@ -164,13 +184,23 @@ export function App() {
     const newPlanning = createPlanningState(budget)
     planningRef.current = newPlanning
 
-    // Build the season summary, appending any milestone celebrations.
+    // Build the season summary, appending the storm outcome and milestone celebrations.
     if (si) {
       const sum = buildSeasonSummary(si.committed, finalState, si.weather)
+      if (si.weather.storm) {
+        const lost = si.storms.reduce((a, s) => a + s.cellsLost, 0)
+        sum.events.push(
+          lost > 0
+            ? `⛈️ A storm tore through — ${lost} ${lost === 1 ? 'cell' : 'cells'} lost.`
+            : '⛈️ A storm blew through, but your tree held firm.',
+        )
+      }
       sum.events.push(...newlyCompletedLogs)
       setSummary(sum)
       summaryInputRef.current = null
     }
+
+    setStormFlash(null)
 
     // Autosave the new planning-phase state.
     saveGame(gameRef.current)
@@ -180,6 +210,7 @@ export function App() {
     setScore(gameRef.current.score)
     setGoalsView(goalsViewOf(gameRef.current))
     setInspected(null)
+    setShedInfo(null)
     setEnergy(newPlanning.energyAvailable)
     setEnergyTotal(newPlanning.energyAvailable)
     setCanAdvance(true)
@@ -192,6 +223,13 @@ export function App() {
     const pb = playbackRef.current
     if (!pb) return
 
+    // Holding for a beat after a storm break so the player registers the damage.
+    if (now < pb.pauseUntil) {
+      pb.lastTime = now  // don't let the clock accumulate steps during the pause
+      pb.rafId = requestAnimationFrame(advancePlayback)
+      return
+    }
+
     const elapsed = now - pb.lastTime
     const steps = Math.floor(elapsed / MS_PER_TICK)
     if (steps > 0) {
@@ -201,7 +239,17 @@ export function App() {
       canvasRef.current?.requestDraw()
       setProgress(pb.frameIdx / (pb.frames.length - 1))
 
-      if (pb.frameIdx >= pb.frames.length - 1) {
+      // Highlight any storm break we just reached: shake, flash, and pause a beat.
+      let paused = false
+      while (pb.nextStorm < pb.storms.length && pb.frameIdx >= pb.storms[pb.nextStorm].frame) {
+        const st = pb.storms[pb.nextStorm++]
+        canvasRef.current?.triggerShake()
+        setStormFlash(`⛈️ A storm snapped ${st.cellsLost} ${st.cellsLost === 1 ? 'cell' : 'cells'}!`)
+        pb.pauseUntil = now + STORM_PAUSE_MS
+        paused = true
+      }
+
+      if (!paused && pb.frameIdx >= pb.frames.length - 1) {
         finishPlayback(pb.frames[pb.frames.length - 1])
         return
       }
@@ -210,11 +258,15 @@ export function App() {
     pb.rafId = requestAnimationFrame(advancePlayback)
   }, [finishPlayback])
 
-  const startPlayback = useCallback((frames: GameState[]) => {
-    const pb = { frames, frameIdx: 0, lastTime: performance.now(), rafId: 0 }
+  const startPlayback = useCallback((frames: GameState[], storms: StormBreak[]) => {
+    const pb = {
+      frames, frameIdx: 0, lastTime: performance.now(), rafId: 0,
+      storms, nextStorm: 0, pauseUntil: 0,
+    }
     playbackRef.current = pb
     gameRef.current = frames[0]
     canvasRef.current?.requestDraw()
+    setStormFlash(null)
     setIsPlaying(true)
     setProgress(0)
     pb.rafId = requestAnimationFrame(advancePlayback)
@@ -223,6 +275,7 @@ export function App() {
   const onSkip = useCallback(() => {
     const pb = playbackRef.current
     if (!pb) return
+    setStormFlash(null)
     finishPlayback(pb.frames[pb.frames.length - 1])
   }, [finishPlayback])
 
@@ -231,6 +284,12 @@ export function App() {
     setEnergy(p.energyAvailable - p.energySpent)
     const reachable = computeReachable(p.stagedCells, gameRef.current)
     setCanAdvance(reachable.size === p.stagedCells.size)
+    // Estimated energy resorbed from leaves marked to shed this fall — surfaced so the
+    // player can see shedding is worth more than letting winter frost take them.
+    const shedKeys = resolvableShedKeys(gameRef.current, p)
+    let e = 0
+    for (const k of shedKeys) e += gameRef.current.cells.get(k)?.energy ?? 0
+    setShedInfo(shedKeys.size > 0 ? { count: shedKeys.size, energy: e * LEAF_SHED_RESORB } : null)
   }, [])
 
   const onTap = useCallback((q: number, r: number) => {
@@ -247,7 +306,8 @@ export function App() {
       const cell = gameRef.current.cells.get(key)
       if (!cell) return
       const set = computeRemovalSet(gameRef.current.cells, key)
-      setInspected({ key, cell, pruneSet: set, cost: pruneCost(cell), severs: seversWholeCanopy(gameRef.current.cells, set) })
+      const stress = computeStructure(gameRef.current.cells).stress.get(key)
+      setInspected({ key, cell, pruneSet: set, cost: pruneCost(cell), severs: seversWholeCanopy(gameRef.current.cells, set), stress })
       canvasRef.current?.requestDraw()
       return
     }
@@ -304,21 +364,62 @@ export function App() {
 
     // 1. Commit staged cells → new game state (label advanced to the next season)
     const committed = applySeasonAdvance(cur, planningRef.current)
-    summaryInputRef.current = { committed, weather, shedThisTurn }
 
     // 2. Run simulation under the planned season's weather; shed leaves resorb + drop
-    //    at season end (after photosynthesizing all season).
+    //    at season end (after photosynthesizing all season). Storm breaks come back
+    //    alongside the frames for the playback highlight + summary.
     const rng = mulberry32(committed.rngSeed)
-    const frames = simulateSeason(committed, rng, weather, shedKeys)
+    const { frames, storms } = runSeason(committed, rng, weather, shedKeys)
+    summaryInputRef.current = { committed, weather, shedThisTurn, storms }
 
     // 3. Animate
-    startPlayback(frames)
+    startPlayback(frames, storms)
   }, [isPlaying, startPlayback])
 
   const onModeChange = useCallback((m: PlacementMode) => {
     setMode(m)
     modeRef.current = m
     canvasRef.current?.requestDraw()
+  }, [])
+
+  // Plant a new seed: clear the save and reset every bit of run state. Guarded by a
+  // confirm because it discards the current tree.
+  const onNewGame = useCallback(() => {
+    if (!window.confirm('Plant a new seed? This ends your current tree and starts over.')) return
+    // Stop any in-flight playback.
+    const pb = playbackRef.current
+    if (pb) cancelAnimationFrame(pb.rafId)
+    playbackRef.current = null
+
+    clearSave()
+    const fresh = createInitialState()
+    gameRef.current = fresh
+    const planning = createPlanningState(bankedEnergy(fresh.cells))
+    planningRef.current = planning
+    summaryInputRef.current = null
+
+    setMode('branch'); modeRef.current = 'branch'
+    setEnergy(planning.energyAvailable)
+    setEnergyTotal(planning.energyAvailable)
+    setCanAdvance(true)
+    setSeasonYear({ season: fresh.season, year: fresh.year })
+    setIsPlaying(false)
+    setProgress(0)
+    setForecast(makeForecast(fresh))
+    setSummary(null)
+    setScore(fresh.score)
+    setGoalsView(goalsViewOf(fresh))
+    setInspected(null)
+    setStormFlash(null)
+    setShedInfo(null)
+    canvasRef.current?.recenter()
+    canvasRef.current?.requestDraw()
+  }, [])
+
+  const onHelp = useCallback(() => setShowIntro(true), [])
+  const onDismissIntro = useCallback(() => {
+    setShowIntro(false)
+    try { localStorage.setItem('treegame.introSeen', '1') } catch { /* ignore */ }
   }, [])
 
   // Spring with a bare canopy: the leaves are gone (deciduous) and the player needs
@@ -331,7 +432,10 @@ export function App() {
     else if (c.type === 'tree') woodCount++
   }
   const leafless = leafCount === 0
-  const springReLeaf = !isPlaying && planningSeason === 'spring' && leafless
+  // Only prompt to re-leaf if the tree has actually grown a leaf before (the first-leaf
+  // milestone) — never on a brand-new seed that has simply never had leaves yet.
+  const hasGrownLeavesBefore = gameRef.current.goals.completed.includes('first-leaf')
+  const springReLeaf = !isPlaying && planningSeason === 'spring' && leafless && hasGrownLeavesBefore
 
   // Fall reserve warning: winter is dormant (no photosynthesis), so the tree survives
   // on banked energy alone — roughly woodCount × 0.3 to last the season, plus a margin
@@ -376,6 +480,7 @@ export function App() {
         showNudge={showNudge}
         springReLeaf={springReLeaf}
         fallReserveHint={fallReserveHint}
+        shedInfo={planningSeason === 'fall' ? shedInfo : null}
         mode={mode}
         canAdvance={canAdvance}
         isPlaying={isPlaying}
@@ -384,6 +489,8 @@ export function App() {
         onAdvanceSeason={onAdvanceSeason}
         onSkip={onSkip}
         onOpenGoals={() => setGoalLogOpen(true)}
+        onNewGame={onNewGame}
+        onHelp={onHelp}
       />
       {inspected && !isPlaying && (
         <Inspector
@@ -392,10 +499,13 @@ export function App() {
           cost={inspected.cost}
           affordable={energyRemaining >= inspected.cost}
           seversCanopy={inspected.severs}
+          stress={inspected.stress}
           onPrune={onPrune}
           onClose={() => setInspected(null)}
         />
       )}
+      {stormFlash && <div className="storm-flash">{stormFlash}</div>}
+      {showIntro && <Intro onDismiss={onDismissIntro} />}
       {goalLogOpen && (
         <GoalLog
           completed={completedMilestones(gameRef.current.goals)}

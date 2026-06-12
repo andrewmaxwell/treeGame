@@ -10,8 +10,11 @@ export interface GoalContext {
   peakCells: number
   seasonSimulated: Season
   yearSimulated: number
-  shedThisTurn: boolean   // did the player shed ≥1 leaf in the just-resolved plan
+  shedThisTurn: boolean    // did the player shed ≥1 leaf in the just-resolved plan
   score: number
+  droughtThisSeason: boolean   // the just-simulated season was a drought
+  stormThisSeason: boolean     // a storm struck the just-simulated season
+  stormCellsLost: number       // cells the season's storm(s) snapped (0 = held firm)
 }
 
 export interface Milestone {
@@ -88,6 +91,18 @@ export const MILESTONES: Milestone[] = [
     goal: 'Mature your first fruit — your first seed!',
     log: 'Your first seed! Life makes more life.',
     check: (c) => c.score > 0 || has(c.cells, 'fruit'),
+  },
+  {
+    id: 'survive-drought',
+    goal: 'Survive a drought',
+    log: 'You weathered a season of drought.',
+    check: (c) => c.droughtThisSeason && c.livingCells > 0,
+  },
+  {
+    id: 'survive-storm',
+    goal: 'Weather a storm without losing a single cell',
+    log: 'A storm raged — and not a single cell fell.',
+    check: (c) => c.stormThisSeason && c.stormCellsLost === 0 && c.livingCells > 0,
   },
 ]
 

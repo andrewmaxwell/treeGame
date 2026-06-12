@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle, type R
 import { createCamera, clampZoom, screenToWorld, type Camera } from '../render/camera'
 import { drawScene, BASE_RADIUS } from '../render/renderer'
 import { computeLight } from '../sim/simulate'
+import { computeStructure } from '../sim/structure'
 import { SEASON_PARAMS } from '../sim/weather'
 import { pixelToHex, hexToPixel } from '../sim/grid'
 import { surfaceR } from '../sim/terrain'
@@ -10,11 +11,13 @@ import type { GameState } from './state'
 import { getValidPlacements, type PlanningState, type PlacementMode } from './planning'
 
 const EMPTY_LIGHT = new Map<string, number>()
+const EMPTY_STRESS = new Map<string, number>()
 const EMPTY_SET = new Set<string>()
 
 export interface GameCanvasHandle {
   requestDraw: () => void
   triggerShake: () => void
+  recenter: () => void   // re-frame the camera on the current tree (e.g. after New Game)
 }
 
 interface GameCanvasProps {
@@ -31,23 +34,48 @@ interface GameCanvasProps {
 // fresh on each (change-driven) planning render — cheap and always reflects staging.
 function computePlanningLight(game: GameState, planning: PlanningState): Map<string, number> {
   if (planning.stagedCells.size === 0 && game.cells.size === 0) return EMPTY_LIGHT
-  const merged = new Map<string, Cell>(game.cells)
-  for (const [k, c] of planning.stagedCells) merged.set(k, c)
-  return computeLight({ ...game, cells: merged }, SEASON_PARAMS[game.season].sunAngleDeg)
+  return computeLight({ ...game, cells: mergeStaged(game, planning) }, SEASON_PARAMS[game.season].sunAngleDeg)
 }
 
-function makeCamera(): Camera {
+// game.cells overlaid with staged growth — the canopy the player is previewing. Used
+// for both the leaf-sun and the structural-stress previews so staged cells see (and
+// cast) the same shade and bear the same load they will once committed.
+function mergeStaged(game: GameState, planning: PlanningState): Map<string, Cell> {
+  const merged = new Map<string, Cell>(game.cells)
+  for (const [k, c] of planning.stagedCells) merged.set(k, c)
+  return merged
+}
+
+// Initial camera: frame the tree. A brand-new seed shows the spawn with ground below;
+// a loaded/grown tree is centred on the bounding box of its living cells (so refreshing
+// mid-game no longer leaves the canopy jammed against the top of the screen).
+function makeCamera(game: GameState): Camera {
   const cam = createCamera()
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, n = 0
+  for (const c of game.cells.values()) {
+    if (c.type === 'soil' || c.type === 'rock') continue
+    const { x, y } = hexToPixel(c.q, c.r, BASE_RADIUS)
+    if (x < minX) minX = x; if (x > maxX) maxX = x
+    if (y < minY) minY = y; if (y > maxY) maxY = y
+    n++
+  }
   const seedWorldY = hexToPixel(0, surfaceR(0), BASE_RADIUS).y
-  cam.x = 0
-  cam.y = seedWorldY + BASE_RADIUS * 1.5 * 5
+  if (n <= 1 || !isFinite(minX)) {
+    // Fresh seed — keep the spawn high-ish so the soil below it is visible.
+    cam.x = 0
+    cam.y = seedWorldY + BASE_RADIUS * 1.5 * 5
+    return cam
+  }
+  cam.x = (minX + maxX) / 2
+  // Bias the centre slightly downward so a little ground shows under the tree.
+  cam.y = (minY + maxY) / 2 + BASE_RADIUS * 1.5
   return cam
 }
 
 export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
   function GameCanvas({ gameRef, planningRef, modeRef, isPlaying, inspectedKey, pruneSet, onTap }, ref) {
     const canvasRef    = useRef<HTMLCanvasElement>(null)
-    const cameraRef    = useRef<Camera>(makeCamera())
+    const cameraRef    = useRef<Camera>(makeCamera(gameRef.current!))
     const rafRef       = useRef<number>(0)
     const dirtyRef     = useRef(true)
     const cssSizeRef   = useRef({ width: 0, height: 0 })
@@ -61,6 +89,7 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
     useImperativeHandle(ref, () => ({
       requestDraw: () => { dirtyRef.current = true },
       triggerShake: () => { shakeUntilRef.current = performance.now() + 350 },
+      recenter: () => { cameraRef.current = makeCamera(gameRef.current!); dirtyRef.current = true },
     }), [])
 
     // Bridge inspector props into the render loop (which reads refs, not props),
@@ -106,9 +135,14 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
           // During planning, show how much sun each leaf (real + staged) receives
           // under the current season's sun angle, including staged-canopy shading.
           const leafLight = isPlaying ? EMPTY_LIGHT : computePlanningLight(g, p)
+          // Stress preview: real cells during playback (watch it redden under a storm),
+          // real + staged during planning (see new growth's structural cost live).
+          const stress = isPlaying
+            ? (g.cells.size > 0 ? computeStructure(g.cells).stress : EMPTY_STRESS)
+            : computeStructure(mergeStaged(g, p)).stress
           const insp = isPlaying ? null : inspectRef.current.key
           const prune = isPlaying ? EMPTY_SET : inspectRef.current.prune
-          drawScene(ctx, width, height, drawCam, g.cells, g.terrain, staged, shed, vp, leafLight, insp, prune)
+          drawScene(ctx, width, height, drawCam, g.cells, g.terrain, staged, shed, vp, leafLight, insp, prune, stress)
         }
       }
 

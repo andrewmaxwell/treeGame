@@ -10,9 +10,13 @@ interface Props {
   cost: number           // energy cost to prune (0 if dead/dying/rotted)
   affordable: boolean
   seversCanopy: boolean  // pruning would cut the whole canopy from the roots
+  stress?: number        // structural stress (load/strength) for wood cells; else undefined
   onPrune: () => void
   onClose: () => void
 }
+
+// Mirrors the renderer's red-tint warning line: at/above this, the cell is a storm risk.
+const STRESS_WARN = 0.8
 
 const TYPE_LABEL: Record<Cell['type'], string> = {
   tree: 'Wood', leaf: 'Leaf', flower: 'Flower', fruit: 'Fruit',
@@ -38,7 +42,7 @@ function status(cell: Cell): { text: string; tone: 'good' | 'warn' | 'bad' } {
   return { text: 'Recovering', tone: 'warn' }
 }
 
-export function Inspector({ cell, removalCount, cost, affordable, seversCanopy, onPrune, onClose }: Props) {
+export function Inspector({ cell, removalCount, cost, affordable, seversCanopy, stress, onPrune, onClose }: Props) {
   // Two-step confirm only when severing the whole canopy.
   const [confirming, setConfirming] = useState(false)
   useEffect(() => { setConfirming(false) }, [cell])
@@ -73,6 +77,12 @@ export function Inspector({ cell, removalCount, cost, affordable, seversCanopy, 
         {cell.type !== 'soil' && <Row label="Energy" value={`${cell.energy.toFixed(1)} / ${CELL_ENERGY_CAP}`} />}
         {!isTerrain && <Row label="Health" value={`${Math.round(cell.health * 100)}%`} />}
         {!isTerrain && cell.rot > 0 && <Row label="Rot" value={`${Math.round(cell.rot * 100)}%`} />}
+        {stress !== undefined && (
+          <Row
+            label="Load stress"
+            value={stress > STRESS_WARN ? `${stress.toFixed(1)}× — storm risk` : `${stress.toFixed(1)}×`}
+          />
+        )}
         {!isTerrain && <Row label="Age" value={`${cell.age} ${cell.age === 1 ? 'season' : 'seasons'}`} />}
       </div>
 

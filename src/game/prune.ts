@@ -1,66 +1,21 @@
 import type { Cell } from '../sim/cells'
-import { HEX_NEIGHBORS, hexKey } from '../sim/grid'
 import { surfaceR } from '../sim/terrain'
+import { applyBreakage } from '../sim/structure'
 
 function isUnderground(cell: Cell): boolean {
   return cell.r >= surfaceR(cell.q)
 }
 
-const WOOD: ReadonlySet<Cell['type']> = new Set<Cell['type']>(['tree', 'deadwood'])
-const TERMINAL: ReadonlySet<Cell['type']> = new Set<Cell['type']>(['leaf', 'flower', 'fruit'])
-
 // The set of cell keys that would be removed if `targetKey` were pruned: the target
 // itself, plus every living/deadwood cell that loses its connection to the root
-// system as a result. Connectivity = BFS from underground tree cells through
-// wood (tree + deadwood); terminals (leaf/flower/fruit) ride along on adjacent wood.
+// system as a result. This is exactly a one-cell "breakage" — the same connectivity
+// rule a storm snap uses (see sim/structure.applyBreakage), so prune and storm damage
+// can never disagree about what falls.
 //
 // Pure — does not mutate `cells`.
 export function computeRemovalSet(cells: Map<string, Cell>, targetKey: string): Set<string> {
-  const removed = new Set<string>()
-  if (!cells.has(targetKey)) return removed
-  removed.add(targetKey)
-
-  // BFS roots: underground tree cells, excluding the pruned one.
-  const reachable = new Set<string>()
-  const queue: string[] = []
-  for (const [key, cell] of cells) {
-    if (key === targetKey) continue
-    if (cell.type === 'tree' && isUnderground(cell)) {
-      if (!reachable.has(key)) { reachable.add(key); queue.push(key) }
-    }
-  }
-
-  // Spread through wood (tree/deadwood), never through the pruned cell.
-  while (queue.length > 0) {
-    const key = queue.shift()!
-    const cell = cells.get(key)!
-    for (const [dq, dr] of HEX_NEIGHBORS) {
-      const nk = hexKey(cell.q + dq, cell.r + dr)
-      if (nk === targetKey || reachable.has(nk)) continue
-      const n = cells.get(nk)
-      if (n && WOOD.has(n.type)) { reachable.add(nk); queue.push(nk) }
-    }
-  }
-
-  // Any wood not reached is cut off → removed.
-  for (const [key, cell] of cells) {
-    if (key === targetKey) continue
-    if (WOOD.has(cell.type) && !reachable.has(key)) removed.add(key)
-  }
-
-  // A terminal survives only if adjacent to some surviving wood cell.
-  for (const [key, cell] of cells) {
-    if (!TERMINAL.has(cell.type) || removed.has(key)) continue
-    let supported = false
-    for (const [dq, dr] of HEX_NEIGHBORS) {
-      const nk = hexKey(cell.q + dq, cell.r + dr)
-      const n = cells.get(nk)
-      if (n && WOOD.has(n.type) && !removed.has(nk)) { supported = true; break }
-    }
-    if (!supported) removed.add(key)
-  }
-
-  return removed
+  if (!cells.has(targetKey)) return new Set<string>()
+  return applyBreakage(cells, new Set([targetKey]))
 }
 
 // Pruning a healthy cell costs energy (wound sealing); pruning dead/dying/rotted

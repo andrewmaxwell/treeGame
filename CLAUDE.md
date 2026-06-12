@@ -282,17 +282,30 @@ Define support explicitly:
 - Run BFS from all underground tree cells (the root system) through living + deadwood
   tree cells. Each above-ground cell's **support parent** = its neighbor with the
   smallest BFS distance to ground (ties: prefer the neighbor more directly below).
-- `load(cell)` = 1 + sum of loads of all cells whose support parent is this cell,
-  plus `lateral_offset² × 0.3`, where lateral_offset = horizontal (pixel-space x)
-  distance from the cell to the point where its support path meets the ground.
-  The squared term punishes long horizontal branches — as it should.
-
-### Strength and stress
-- `strength(cell)` = number of tree/deadwood cells within graph distance 2 at the same
-  row (r) — i.e., local cross-section width — × 3
-- `stress(cell) = load(cell) / strength(cell)`
-- Cells with stress > 0.8 get a subtle red tint at all times (early warning, and a
-  live preview during planning so the player sees consequences before confirming)
+### Strength and stress (revised — balance-aware bending model)
+The original `load = 1 + lateral²·0.3` model was replaced: it was non-local (re-routing
+the support path made an upper cell's stress jump when you thickened wood *below* it),
+too aggressive, and counter-intuitive. The current model (`sim/structure.ts`):
+- For each wood cell, accumulate its **supported subtree** down the support parents:
+  `cnt` (cells resting on it) and `sumX` (Σ pixel-x of those cells).
+- `moment(cell) = |sumX − cnt·x_self|` — the *horizontal imbalance* of the load it
+  carries. Zero for a balanced or purely-vertical load; large for a one-sided
+  cantilever (and largest at a limb's attachment, fading to ~0 at the tip). Opposed
+  branches cancel; a lone long branch does not.
+- `strength(cell)` = same-row wood within graph distance 2 × 3 (horizontal cross-
+  section = a vertical member's girth; min 3). A long branch's own cells read as "wide"
+  and thus strong, which is correct — branches don't snap mid-span; their moment is
+  borne by the *narrow trunk at the junction*, which is where the red shows.
+- `stress = (moment·0.2 + cnt·0.03) / strength`. The small `cnt` term keeps a huge
+  balanced canopy on a thin trunk from being totally storm-proof.
+- This is **local**: an upper cell sees only the wood above it, so thickening the trunk
+  lower never changes its stress (the old complaint is gone).
+- **Pixel-space caveat:** a constant-`q` stack leans left on screen (x = q + r/2), so it
+  genuinely accrues moment and reddens; a "visually straight up" zig-zag trunk (alt
+  upper-left/upper-right) stays near zero. This is honest (the leaning trunk *looks*
+  leaning) but worth knowing. Calibrated in `structure.test.ts`.
+- Cells with stress > 0.8 (`STRESS_WARN`) get a subtle red tint at all times (early
+  warning, and a live preview during planning over real + staged cells).
 
 ### Storms and breaking
 - Storm thresholds: minor 1.2, moderate 0.9, severe 0.6
@@ -302,6 +315,29 @@ Define support explicitly:
   root system. The fallen wood is gone — it's on the ground now, not part of the tree.
 - The playback pauses for a beat and highlights the break ("A storm snapped your
   east branch — 14 cells lost")
+
+**M8 implementation** (`sim/structure.ts`):
+- `computeStructure(cells)` returns per wood-cell `moment`, `strength`, `stress` maps.
+  Support graph = multi-source BFS from underground (root) wood cells through tree +
+  deadwood; each cell's support parent is its lowest-BFS-distance neighbour (ties →
+  larger r, then smaller pixel-x offset — "more directly below"). See "Strength and
+  stress" above for the balance-aware bending model (moment / same-row strength).
+- `applyBreakage(cells, removed)` is the shared connectivity rule for *both* storm
+  snaps and pruning: from the removed set, also drop any wood the roots can no longer
+  reach and any terminal left without a wood neighbour. `prune.computeRemovalSet`
+  delegates to it (a one-cell breakage), so prune and storm damage can never disagree.
+- Storms live on `SeasonWeather.storm` (deterministic, rolled *after* rain so existing
+  forecasts are byte-identical). Enabled Year 2+; severity scales with the difficulty
+  curve (severe only Year 9+). `runSeason()` returns `{ frames, storms }` (and
+  `simulateSeason()` is the frames-only wrapper the sim tests use); the storm check
+  runs as tick-order step 10. Roots (underground) never snap — a tree blows down at the
+  trunk, it isn't uprooted. The HUD flashes a banner + camera shake + brief playback
+  pause on each break; the season summary reports the outcome.
+- Live stress tint: cells with stress > 0.8 (`STRESS_WARN`) get a red overlay at all
+  times, including a planning preview over real + staged cells. The Inspector shows a
+  "Load stress" row (flagged "storm risk" past the line).
+- Milestones added: "Survive a drought" and "Weather a storm without losing a single
+  cell" (both now reachable; the flower/fruit goals still sit unreachable until M10).
 
 ---
 
@@ -324,23 +360,27 @@ Define support explicitly:
 - **Frost**: see frost rules below — this is a core mechanic, not a footnote
 
 ### Frost and the deciduous cycle (core mechanic)
-- **At winter onset (first tick of winter), every leaf cell on the tree dies and
-  drops** (removed from map). A leaf you never shed still resorbs **30% of its stored
-  energy** back into the adjacent tree cells (`LEAF_FROST_RESORB`); the rest is wasted.
-- **Shedding leaves during fall planning resorbs 75% of each leaf's stored energy**
-  back into the tree (`LEAF_SHED_RESORB`, nutrient resorption — what real deciduous
-  trees do). Resorption is **proportional to the leaf's actual energy**, not a flat
-  amount — this makes the canopy a genuinely *recoverable* energy store, so a tree can
-  re-leaf in spring instead of starving.
-- **Shed timing (critical):** a marked leaf is **not** removed when the season is
-  advanced. It photosynthesizes through the entire season and only drops at *season
-  end* (`resolveShedding` in `simulate.ts`, run after the last tick, before aging),
-  resorbing its end-of-season energy. Marking is therefore **budget-neutral during
-  planning** — the energy returns in *next* season's budget, not the current one.
-  Earlier the shed happened at advance, *before* the season ran, which forfeited fall's
-  photosynthesis and starved the tree to a permanent 0-energy dead end even though the
-  in-game milestone tells you to shed. Both "shed in fall" and "keep leaves, let winter
-  frost take them at 30%" are now viable, with fall-shedding the better play. Guarded by
+- **The whole canopy drops at the END of fall** (`resolveAutumnDrop` in `simulate.ts`,
+  run after fall's last tick, before aging) — the deciduous reset. Leaves you marked to
+  shed resorb **75%** of their stored energy into the adjacent wood (`LEAF_SHED_RESORB`);
+  leaves you left on resorb only **30%** (`LEAF_FROST_RESORB`). Either way they
+  photosynthesised all fall first, and either way the tree is **bare entering winter**.
+- **Why the drop is at fall-end, not winter-onset (important fix):** previously the
+  canopy survived into the winter *planning* phase and was frost-killed at winter's
+  first sim tick. That meant the winter budget counted leaf energy that was about to be
+  destroyed — the player saw "⚡13 in winter" then "⚡3 in spring" and reasonably read it
+  as a bug. Dropping the canopy entering winter makes the winter budget honestly equal
+  the tree's overwintering reserves; winter→spring now changes only by dormancy upkeep.
+  It also lifts spring budgets (the 30% resorb is banked in wood, not lost), so the tree
+  grows noticeably faster year to year. `winterFrost` remains a backstop for any
+  leaf/flower/fruit somehow present at winter onset (e.g. a directly-constructed test
+  state) and for killing age-0 winter growth.
+- Resorption is **proportional to the leaf's actual energy** (not flat), so the canopy
+  is a genuinely *recoverable* store and the tree re-leafs in spring instead of starving.
+- **Shed marking is budget-neutral during planning** — the resorbed energy returns in
+  *next* spring's budget, not the current one. The HUD shows a live estimate of what
+  shedding will bank (`shedInfo`) so the 75% vs 30% benefit is visible. Both "shed in
+  fall" and "leave them on" are viable (shedding is the better play). Guarded by
   `recovery.test.ts` (both strategies grow their winter reserves year over year).
 - **Spring frost** (possible in early years' forecasts, more common later): kills all
   cells placed in the immediately preceding planning phase. The forecast warns of
@@ -576,7 +616,7 @@ reserves — feeds into that answer.
 **M7 implementation notes**
 - Inspector (`ui/Inspector.tsx`) shows type, water, energy, health, rot, age plus a
   plain-language status line ("Water-stressed", "Low on energy", "Thriving", …) so the
-  color map is legible. **Stress is intentionally absent until M8** adds the support graph.
+  color map is legible. (M8 added a "Load stress" row once the support graph existed.)
 - Pruning (`game/prune.ts`) applies immediately to the game state; the wound-sealing
   cost is accrued on `PlanningState.pruneCostAccrued` and deducted at season advance.
   Removal set = the cell plus everything that loses root-connectivity (BFS through
@@ -586,6 +626,20 @@ reserves — feeds into that answer.
   season summary + goal log. Flower/fruit milestones (7–8) can't complete until M10.
 
 ---
+
+## Known UX gaps (backlog — from playtest feedback, not yet built)
+
+- **Playback reads as static.** During the 60-tick season animation the only obvious
+  change is the progress bar; per-tick water/energy colour shifts are too subtle to
+  notice, and nothing "happens" visually unless a storm hits. Wants: grow-in pop for new
+  cells, a visible water/energy pulse up the trunk, leaf shimmer in sun, a falling-leaf
+  animation at the autumn drop. (Camera centring on load was fixed; the tree is at least
+  in frame now.)
+- **Camera doesn't follow growth.** CLAUDE.md specifies a gentle drift to keep new
+  growth in frame unless the player has manually panned recently; not implemented. The
+  initial camera now fits the loaded tree's bounding box (`makeCamera` in `GameCanvas`),
+  but it does not re-frame as the tree grows during a run.
+- **Minimap** (corner overview once the tree exceeds ~1.5× viewport) — specified, not built.
 
 ## Decisions Deferred (do not implement yet)
 
