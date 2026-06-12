@@ -20,6 +20,7 @@ interface HUDProps {
   currentGoal: string | null   // current objective text
   completedGoals: number       // for the goal-log button badge
   showNudge: boolean           // gentle unspent-energy nudge
+  springReLeaf: boolean        // spring + no leaves → prompt to regrow the canopy
   mode: PlacementMode
   canAdvance: boolean
   isPlaying: boolean
@@ -39,7 +40,7 @@ const SEASON_LABEL: Record<Season, string> = {
 
 export function HUD({
   energyRemaining, energyTotal, season, year, score, forecast,
-  currentGoal, completedGoals, showNudge, mode, canAdvance,
+  currentGoal, completedGoals, showNudge, springReLeaf, mode, canAdvance,
   isPlaying, playbackProgress,
   onModeChange, onAdvanceSeason, onSkip, onOpenGoals,
 }: HUDProps) {
@@ -84,6 +85,13 @@ export function HUD({
       {!isPlaying && season === 'winter' && (
         <div className={styles.warning}>
           ❄️ Frost ahead — anything you plant now will die at winter's first frost.
+        </div>
+      )}
+
+      {/* Spring re-leaf guidance — the deciduous cycle's most confusing moment */}
+      {!isPlaying && springReLeaf && (
+        <div className={styles.springHint}>
+          🌱 Spring! Your leaves dropped over winter — switch to <b>Leaf</b> mode and grow a new canopy to restart photosynthesis.
         </div>
       )}
 

@@ -388,6 +388,15 @@ kill and winter-growth (age-0) frost death are implemented.
 - Costs: tree cell **1**, leaf cell **1**, flower **3**
 - New cells enter the world with water 2 and energy 1 (included in the cost)
 - When the season advances, total cost is deducted from cells proportionally
+- **Spring vigor floor (`SPRING_VIGOR` = 3):** in spring the budget is
+  `max(bankedEnergy, 3)`. Leaves are the only energy source but a leaf costs 1 energy
+  to grow — so a leafless tree that has drained to 0 (e.g. a new player who spent the
+  seed's reserve on wood) could *never* afford a leaf again: an unrecoverable softlock
+  while still alive (roots keep the wood at health 0.5 forever). The floor mints energy
+  only into leaves you actually plant (the existing "no payers → no deduction" path),
+  so it's a spring-flush recovery lifeline, not a farmable hoard. Healthy trees
+  (banked ≫ 3) are unaffected. The HUD also shows a spring re-leaf prompt when the
+  canopy is bare. Guarded by `recovery.test.ts` ("starved to 0 … recovers via floor").
 
 ### Staging
 - Tap an empty cell adjacent to any tree cell (staged or real) to stage growth there —

@@ -7,6 +7,14 @@ export type PlacementMode = 'branch' | 'leaf'
 
 export const CELL_COST = 1     // energy cost per staged tree/leaf cell
 
+// Spring "vigor": a living tree always has at least this much budget in spring,
+// representing reserves mobilized to flush new growth. It only matters when the tree
+// has starved its banked energy toward zero — without it, a leafless tree at 0 energy
+// can never afford the 1 energy a leaf costs, so it can never photosynthesize again
+// (an unrecoverable softlock while still alive). The floor mints energy only into
+// leaves you actually plant, so it's a recovery lifeline, not a free hoard.
+export const SPRING_VIGOR = 3
+
 function isLivingType(t: CellType): boolean {
   return t === 'tree' || t === 'leaf' || t === 'flower' || t === 'fruit'
 }

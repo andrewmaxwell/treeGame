@@ -9,7 +9,7 @@ import { generateWeather } from '../sim/weather'
 import { hexKey } from '../sim/grid'
 import { TerrainGen } from '../sim/terrain'
 import {
-  createPlanningState, handleTap, applySeasonAdvance, resolvableShedKeys, bankedEnergy, getValidPlacements,
+  createPlanningState, handleTap, applySeasonAdvance, resolvableShedKeys, bankedEnergy, getValidPlacements, SPRING_VIGOR,
 } from './planning'
 import type { GameState } from './state'
 import type { Cell } from '../sim/cells'
@@ -22,7 +22,10 @@ function seedState(): GameState {
 
 function advance(game: GameState, plan: (g: GameState, p: ReturnType<typeof createPlanningState>) => ReturnType<typeof createPlanningState>): GameState {
   const w = generateWeather(game.season, game.year, game.worldSeed)
-  const pl = plan(game, createPlanningState(bankedEnergy(game.cells)))
+  // Mirror the app: spring budget is floored by the tree's vigor.
+  const banked = bankedEnergy(game.cells)
+  const budget = game.season === 'spring' ? Math.max(banked, SPRING_VIGOR) : banked
+  const pl = plan(game, createPlanningState(budget))
   const shed = resolvableShedKeys(game, pl)
   const committed = applySeasonAdvance(game, pl)
   const frames = simulateSeason(committed, mulberry32(committed.rngSeed), w, shed)
@@ -95,6 +98,35 @@ describe('multi-year deciduous recovery', () => {
     expect(winterBanks[1]).toBeGreaterThan(winterBanks[0])
     expect(winterBanks[2]).toBeGreaterThan(winterBanks[1])
     expect(alive).toBe(true)
+  })
+
+  it('a tree starved to 0 energy can still recover via the spring vigor floor', () => {
+    // Build ONLY wood in spring Y1 (no leaves) — the classic new-player trap. With no
+    // photosynthesis the tree drains to 0 and would softlock forever. Re-leafing each
+    // spring (funded by the vigor floor) must pull it back to positive production.
+    let game = seedState()
+    let starved = false
+    let recovered = false
+
+    for (let i = 0; i < 8; i++) {
+      game = advance(game, (g, pl) => {
+        if (g.season === 'spring' && g.year === 1) {
+          for (const [q, r] of [[0, 1], [0, 2], [0, -1], [0, -2]] as [number, number][]) {
+            const res = handleTap(q, r, 'branch', g, pl)
+            if (res.kind === 'placed') pl = res.planning!
+          }
+          return pl
+        }
+        if (g.season === 'spring') return reLeaf(g, pl)
+        return pl
+      })
+      if (bankedEnergy(game.cells) === 0) starved = true
+      if (starved && bankedEnergy(game.cells) > SPRING_VIGOR) recovered = true
+    }
+
+    expect(starved).toBe(true)     // it really did hit zero (the trap)
+    expect(recovered).toBe(true)   // …and climbed back out (banked > vigor floor again)
+    expect([...game.cells.values()].some((c) => c.type === 'tree')).toBe(true)  // still alive
   })
 
   it('shedding at the start of fall (the instructed strategy) also thrives', () => {

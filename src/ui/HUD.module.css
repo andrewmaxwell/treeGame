@@ -79,6 +79,25 @@
 .goalBar:hover { background: rgba(90, 78, 26, 0.8); }
 .goalIcon { margin-right: 4px; }
 
+/* ── Spring re-leaf hint ──────────────────────────────────────────────────── */
+.springHint {
+  align-self: center;
+  margin-top: 8px;
+  max-width: 460px;
+  padding: 7px 16px;
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: center;
+  color: #d8f5cf;
+  background: rgba(40, 95, 45, 0.8);
+  border: 1px solid rgba(120, 210, 120, 0.5);
+  border-radius: 14px;
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+}
+.springHint b { color: #fff; }
+
 /* ── Unspent-energy nudge ─────────────────────────────────────────────────── */
 .nudge {
   align-self: center;

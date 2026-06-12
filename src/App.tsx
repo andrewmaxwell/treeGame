@@ -13,6 +13,7 @@ import {
   computeReachable,
   bankedEnergy,
   CELL_COST,
+  SPRING_VIGOR,
   type PlanningState,
   type PlacementMode,
 } from './game/planning'
@@ -156,8 +157,11 @@ export function App() {
 
     gameRef.current = { ...finalState, rngSeed: nextSeed, goals: nextGoals }
 
-    // Planning budget = total banked energy across all living (non-deadwood) cells.
-    const newPlanning = createPlanningState(bankedEnergy(finalState.cells))
+    // Planning budget = total banked energy across all living (non-deadwood) cells,
+    // floored in spring by the tree's vigor so a starved tree can always re-leaf.
+    const banked = bankedEnergy(finalState.cells)
+    const budget = finalState.season === 'spring' ? Math.max(banked, SPRING_VIGOR) : banked
+    const newPlanning = createPlanningState(budget)
     planningRef.current = newPlanning
 
     // Build the season summary, appending any milestone celebrations.
@@ -317,11 +321,19 @@ export function App() {
     canvasRef.current?.requestDraw()
   }, [])
 
-  // Gentle unspent-energy nudge: early years, growth seasons only (hoarding into
-  // fall/winter is correct, so it's suppressed there).
+  // Spring with a bare canopy: the leaves are gone (deciduous) and the player needs
+  // to grow new ones to restart photosynthesis. This is the single most confusing
+  // moment for new players, so call it out explicitly.
   const planningSeason = seasonYear.season
+  const leafless = ![...gameRef.current.cells.values()].some((c) => c.type === 'leaf')
+  const springReLeaf = !isPlaying && planningSeason === 'spring' && leafless
+
+  // Gentle unspent-energy nudge: early years, growth seasons only (hoarding into
+  // fall/winter is correct, so it's suppressed there). Suppressed when the more
+  // specific spring re-leaf hint is showing.
   const showNudge =
     !isPlaying &&
+    !springReLeaf &&
     seasonYear.year <= 4 &&
     planningSeason !== 'fall' &&
     planningSeason !== 'winter' &&
@@ -350,6 +362,7 @@ export function App() {
         currentGoal={goalsView.current}
         completedGoals={goalsView.completedCount}
         showNudge={showNudge}
+        springReLeaf={springReLeaf}
         mode={mode}
         canAdvance={canAdvance}
         isPlaying={isPlaying}
