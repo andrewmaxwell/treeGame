@@ -44,6 +44,12 @@ export const STRESS_WARN = 0.8
 const MOMENT_W = 0.2
 const LOAD_W = 0.03
 
+// Reproductive load (Milestone 9): flowers and especially fruit hang weight on the wood
+// that anchors them, so a fruit-laden cantilever accrues moment and reddens — and is far
+// likelier to snap in a storm, costing the whole limb's harvest. Leaves stay weightless
+// (the existing calibration assumes a weightless canopy). A fruit weighs ~2.5 wood cells.
+const TERMINAL_LOAD: Partial<Record<Cell['type'], number>> = { flower: 1, fruit: 2.5 }
+
 export function computeStructure(cells: Map<string, Cell>): StructureInfo {
   // Wood-only view: trunk, branches, roots, and deadwood all bear load.
   const wood = new Map<string, Cell>()
@@ -98,6 +104,28 @@ export function computeStructure(cells: Map<string, Cell>): StructureInfo {
   const cnt = new Map<string, number>()
   const sumX = new Map<string, number>()
   for (const [k, c] of wood) { cnt.set(k, 1); sumX.set(k, hexPixelX(c.q, c.r)) }
+
+  // Hang each flower/fruit's weight on one anchoring wood cell — the adjacent wood
+  // closest to ground (tie: more directly below), so the load reads as resting on the
+  // limb beneath it. Seeded before the down-accumulation so it propagates to the trunk.
+  for (const [, c] of cells) {
+    const load = TERMINAL_LOAD[c.type]
+    if (load === undefined) continue
+    let best: string | null = null
+    let bestDist = Infinity, bestR = -Infinity
+    for (const [dq, dr] of HEX_NEIGHBORS) {
+      const nk = hexKey(c.q + dq, c.r + dr)
+      const nc = wood.get(nk)
+      const nd = nc ? dist.get(nk) : undefined
+      if (nc === undefined || nd === undefined) continue
+      if (nd < bestDist || (nd === bestDist && nc.r > bestR)) { best = nk; bestDist = nd; bestR = nc.r }
+    }
+    if (best !== null) {
+      cnt.set(best, cnt.get(best)! + load)
+      sumX.set(best, sumX.get(best)! + load * hexPixelX(c.q, c.r))
+    }
+  }
+
   const order = [...wood.keys()]
     .filter((k) => dist.has(k))
     .sort((a, b) => dist.get(b)! - dist.get(a)!)  // farthest-from-ground first

@@ -7,6 +7,9 @@ import {
   updateHealth,
   simulateSeason,
   runSeason,
+  PHOTO_COEFF,
+  LIGHT_GROUND_FACTOR,
+  LIGHT_FULL_HEIGHT,
 } from './simulate'
 import { mulberry32 } from './rng'
 import { generateWeather, TICKS_PER_SEASON, type SeasonWeather, type StormSeverity } from './weather'
@@ -102,7 +105,7 @@ describe('diffuseWater — flow cap', () => {
     const rng = mulberry32(0)
     const after = diffuseWater(state, rng)
     const lost = 15 - after.cells.get(hexKey(0, 1))!.water
-    // desired flow = 15 * 0.15 = 2.25 > 2.0 cap
+    // desired flow = 15 * DIFFUSE_RATE (0.5) = 7.5 > 2.0 cap
     expect(lost).toBeCloseTo(2.0, 5)
   })
 })
@@ -192,14 +195,14 @@ describe('computeLight — occlusion', () => {
 // ─── energy diffusion ──────────────────────────────────────────────────────
 
 describe('diffuseEnergy', () => {
-  it('leaf (energy 10) → tree (energy 0): tree gains ~1.5 in one tick', () => {
+  it('leaf (energy 10) → tree (energy 0): tree gains 2.0 (cap) in one tick', () => {
     const state = makeState([
       mkCell(0, -11, 'leaf', { energy: 10 }),
       mkCell(0, -10, 'tree', { energy: 0 }),  // (0,-11)+[0,1] = (0,-10): adjacent
     ])
     const after = diffuseEnergy(state, mulberry32(0))
     const tree = after.cells.get(hexKey(0, -10))!.energy
-    expect(tree).toBeCloseTo(1.5, 5)  // 10 × 0.15, under the 2.0 cap
+    expect(tree).toBeCloseTo(2.0, 5)  // 10 × 0.5 = 5, clamped to the 2.0 flow cap
   })
 
   it('adjacent leaves do not exchange energy directly (terminals route through wood)', () => {
@@ -226,11 +229,22 @@ describe('diffuseEnergy', () => {
 // ─── photosynthesis ──────────────────────────────────────────────────────────
 
 describe('photosynthesize', () => {
-  it('a fully lit leaf gains lightLevel × intensity × 0.12 energy', () => {
-    const state = makeState([mkCell(0, -1, 'leaf', { energy: 0 })])
+  it('a fully lit, fully lifted leaf gains lightLevel × intensity × PHOTO_COEFF energy', () => {
+    // r = -10 is ≥ LIGHT_FULL_HEIGHT above the surface, so heightLightFactor = 1.
+    const state = makeState([mkCell(0, -10, 'leaf', { energy: 0 })])
     const light = computeLight(state, 5)  // single leaf → lightLevel 1.0
     const after = photosynthesize(state, light, 1.0)
-    expect(after.cells.get(hexKey(0, -1))!.energy).toBeCloseTo(0.12, 5)
+    expect(after.cells.get(hexKey(0, -10))!.energy).toBeCloseTo(PHOTO_COEFF, 5)
+  })
+
+  it('a ground-level leaf is dimmed by the height factor (reason to grow tall)', () => {
+    const state = makeState([mkCell(0, -1, 'leaf', { energy: 0 })])  // 1 cell above surface
+    const after = photosynthesize(state, computeLight(state, 5), 1.0)
+    const gained = after.cells.get(hexKey(0, -1))!.energy
+    // h = 1 above the surface → factor = GROUND + (1/FULL_HEIGHT)·(1-GROUND).
+    const expectedFactor = LIGHT_GROUND_FACTOR + (1 / LIGHT_FULL_HEIGHT) * (1 - LIGHT_GROUND_FACTOR)
+    expect(gained).toBeLessThan(PHOTO_COEFF)                              // dimmed vs full height
+    expect(gained).toBeCloseTo(PHOTO_COEFF * expectedFactor, 5)          // exactly the ground dimming
   })
 })
 
@@ -287,6 +301,32 @@ describe('updateHealth — recovery', () => {
     }
     expect(prev).toBeLessThan(1.0)     // asymptotic — never quite reaches 1.0
   })
+
+  // Wood health is WATER-driven (structure is dead scaffolding + water-conducting sapwood);
+  // energy is just stored growth currency. A well-watered root at energy 0 must stay healthy
+  // — this is what stopped every tall tree sitting pinned at health 0.5 with starved roots.
+  it('a well-watered root at energy 0 trends toward full health', () => {
+    const sr = surfaceR(0)
+    let s = makeState([mkCell(0, sr + 2, 'tree', { water: 8, energy: 0, health: 0.5 })])
+    const key = hexKey(0, sr + 2)
+    let prev = 0.5
+    for (let i = 0; i < 50; i++) {
+      s = updateHealth(s)
+      const h = s.cells.get(key)!.health
+      expect(h).toBeGreaterThan(prev)
+      prev = h
+    }
+  })
+
+  // The flip side: a leaf (metabolically active terminal) at energy 0 must NOT reach full
+  // health — terminals still need both water and energy. Guards against over-broadening
+  // the wood exemption to all cell types.
+  it('a leaf at energy 0 (well-watered) stalls at the half-health target', () => {
+    let s = makeState([mkCell(0, -5, 'leaf', { water: 8, energy: 0, health: 0.5 })])
+    const key = hexKey(0, -5)
+    for (let i = 0; i < 200; i++) s = updateHealth(s)
+    expect(s.cells.get(key)!.health).toBeLessThan(0.55)  // hovers at the 0.5 target
+  })
 })
 
 // ─── winter onset frost (deciduous reset) ────────────────────────────────────
@@ -328,6 +368,15 @@ describe('simulateSeason — winter onset', () => {
     const root = frames[frames.length - 1].cells.get(hexKey(0, 0))!
     expect(root.age).toBe(3)  // was 2
   })
+
+  it('spares a fresh (age-0) UNDERGROUND root — winter roots are insulated', () => {
+    const sr = surfaceR(0)
+    const cells = winterTree().concat([
+      { q: 0, r: sr + 1, type: 'tree', water: 5, energy: 5, health: 1, rot: 0, age: 0 },  // fresh winter root
+    ])
+    const frames = simulateSeason(makeState(cells), mulberry32(1), generateWeather('winter', 3, 99))
+    expect(frames[frames.length - 1].cells.has(hexKey(0, sr + 1))).toBe(true)
+  })
 })
 
 // ─── fall shedding (resolves at season end) ──────────────────────────────────
@@ -354,22 +403,20 @@ describe('simulateSeason — fall shedding', () => {
     expect(frames[frames.length - 1].cells.has(hexKey(0, -2))).toBe(false)
   })
 
-  it('shedding in fall resorbs more energy than letting the autumn drop take the leaf', () => {
+  it('auto-sheds the whole canopy in fall, resorbing the full rate regardless of marking', () => {
     const fallW = generateWeather('fall', 2, 99)
-    const shedKey = new Set([hexKey(0, -2)])
     const last = (frames: GameState[]) => frames[frames.length - 1]
     const bank = (s: GameState) =>
       [...s.cells.values()].reduce((a, c) => a + (c.type === 'tree' ? c.energy : 0), 0)
 
-    // The whole canopy now drops at fall's end either way (deciduous): shed-marked
-    // leaves resorb 75%, the rest only 30%. Both leaves photosynthesise all fall first.
-    const aFall = last(simulateSeason(makeState(tree()), mulberry32(3), fallW, shedKey))  // shed
-    const bFall = last(simulateSeason(makeState(tree()), mulberry32(3), fallW))           // kept
+    // The whole canopy drops at fall's end automatically, every leaf resorbing the full
+    // 75% — so marking a leaf to shed (the old busywork) no longer changes the outcome.
+    const marked = last(simulateSeason(makeState(tree()), mulberry32(3), fallW, new Set([hexKey(0, -2)])))
+    const unmarked = last(simulateSeason(makeState(tree()), mulberry32(3), fallW))
 
-    expect(aFall.cells.has(hexKey(0, -2))).toBe(false)  // canopy is bare entering winter
-    expect(bFall.cells.has(hexKey(0, -2))).toBe(false)  // …whether shed or not
-    // Higher resorption rate (0.75 vs 0.30) leaves more banked in the wood.
-    expect(bank(aFall)).toBeGreaterThan(bank(bFall))
+    expect(marked.cells.has(hexKey(0, -2))).toBe(false)    // canopy is bare entering winter
+    expect(unmarked.cells.has(hexKey(0, -2))).toBe(false)  // …marked or not
+    expect(bank(marked)).toBeCloseTo(bank(unmarked), 5)    // identical resorption
   })
 })
 

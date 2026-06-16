@@ -34,6 +34,13 @@ function status(cell: Cell): { text: string; tone: 'good' | 'warn' | 'bad' } {
   if (cell.rot > 0) return { text: 'Rotting', tone: 'bad' }
   if (cell.health < 0.3) return { text: 'Dying', tone: 'bad' }
   const dryish = cell.water < 3
+  // Wood (trunk + roots) is structural — its health rides on WATER alone. Its energy is
+  // just stored growth currency, so a root at energy 0 is fine; don't flag it as starved.
+  if (cell.type === 'tree') {
+    if (dryish) return { text: 'Water-stressed', tone: 'warn' }
+    if (cell.health > 0.9) return { text: 'Thriving', tone: 'good' }
+    return { text: 'Recovering', tone: 'warn' }
+  }
   const starved = cell.energy < 2
   if (dryish && starved) return { text: 'Starving and parched', tone: 'bad' }
   if (dryish) return { text: 'Water-stressed', tone: 'warn' }
@@ -82,6 +89,12 @@ export function Inspector({ cell, removalCount, cost, affordable, seversCanopy, 
             label="Load stress"
             value={stress > STRESS_WARN ? `${stress.toFixed(1)}× — storm risk` : `${stress.toFixed(1)}×`}
           />
+        )}
+        {stress !== undefined && stress > STRESS_WARN && (
+          <p className={styles.hint}>
+            A one-sided limb bends hardest here. Widen the trunk <em>at this row</em>, shorten
+            the heavy branch, or balance it with growth on the opposite side.
+          </p>
         )}
         {!isTerrain && <Row label="Age" value={`${cell.age} ${cell.age === 1 ? 'season' : 'seasons'}`} />}
       </div>

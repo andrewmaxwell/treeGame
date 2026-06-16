@@ -21,13 +21,15 @@ interface HUDProps {
   completedGoals: number       // for the goal-log button badge
   showNudge: boolean           // gentle unspent-energy nudge
   springReLeaf: boolean        // spring + leaves actually dropped → prompt to regrow
-  fallReserveHint: boolean     // fall + low reserves → warn to bank energy for winter
-  shedInfo: { count: number; energy: number } | null  // fall: feedback on marked-shed leaves
+  flowerNoSpots: boolean       // flower mode active but nowhere valid to bloom
   mode: PlacementMode
+  flowerUnlocked: boolean       // spring + 30-cell milestone → show the Flower toggle
   canAdvance: boolean
   isPlaying: boolean
   playbackProgress: number  // 0–1
+  playbackStats: { water: number; energy: number } | null  // live totals during playback
   onModeChange: (m: PlacementMode) => void
+  onAutoLeaf: () => void
   onAdvanceSeason: () => void
   onSkip: () => void
   onOpenGoals: () => void
@@ -44,9 +46,9 @@ const SEASON_LABEL: Record<Season, string> = {
 
 export function HUD({
   energyRemaining, energyTotal, season, year, score, forecast,
-  currentGoal, completedGoals, showNudge, springReLeaf, fallReserveHint, shedInfo, mode, canAdvance,
-  isPlaying, playbackProgress,
-  onModeChange, onAdvanceSeason, onSkip, onOpenGoals, onNewGame, onHelp,
+  currentGoal, completedGoals, showNudge, springReLeaf, flowerNoSpots, mode, flowerUnlocked, canAdvance,
+  isPlaying, playbackProgress, playbackStats,
+  onModeChange, onAutoLeaf, onAdvanceSeason, onSkip, onOpenGoals, onNewGame, onHelp,
 }: HUDProps) {
   const energy = Math.floor(energyRemaining)
   const total = Math.floor(energyTotal)
@@ -76,7 +78,7 @@ export function HUD({
             🏅 {completedGoals}
           </button>
           <button className={styles.iconBtn} onClick={onHelp} title="How to play">?</button>
-          <button className={styles.iconBtn} onClick={onNewGame} title="Plant a new seed (restart)">⟳</button>
+          <button className={`${styles.iconBtn} ${styles.iconBtnReload}`} onClick={onNewGame} title="Plant a new seed (restart)">⟳</button>
         </div>
       </div>
 
@@ -87,11 +89,23 @@ export function HUD({
         </button>
       )}
 
-      {/* Playback progress bar — only visible during simulation */}
+      {/* Playback progress bar + live tree totals — only visible during simulation */}
       {isPlaying && (
-        <div className={styles.progressTrack}>
-          <div className={styles.progressBar} style={{ width: `${playbackProgress * 100}%` }} />
-        </div>
+        <>
+          {playbackStats && (
+            <div className={styles.playStats}>
+              <span title="Total water held across the tree (rises with rain/roots, falls with transpiration)">
+                💧 {Math.round(playbackStats.water)}
+              </span>
+              <span title="Total energy held across the tree (rises with photosynthesis, falls with metabolism)">
+                ⚡ {Math.round(playbackStats.energy)}
+              </span>
+            </div>
+          )}
+          <div className={styles.progressTrack}>
+            <div className={styles.progressBar} style={{ width: `${playbackProgress * 100}%` }} />
+          </div>
+        </>
       )}
       </div>
 
@@ -100,7 +114,14 @@ export function HUD({
         {/* Winter planning guidance */}
         {!isPlaying && season === 'winter' && (
           <div className={styles.warning}>
-            ❄️ Winter is for pruning &amp; reshaping — new growth dies at frost. Tidy up if you like, then just <b>Advance Season</b> to ride out the cold.
+            ❄️ Winter: extend <b>roots</b> underground (they're insulated) and <b>prune</b> deadwood or red over-stressed limbs (free if dead/dying). Above-ground growth dies at frost. Then <b>Advance Season</b> to ride out the cold.
+          </div>
+        )}
+
+        {/* Flower mode but nowhere to bloom — the #1 flower confusion. */}
+        {!isPlaying && flowerNoSpots && (
+          <div className={styles.springHint}>
+            🌸 Nowhere to bloom yet — flowers need a <b>healthy branch</b> (over 60%, not greyed) with an open or leafy hex beside it. Grow or heal your canopy first.
           </div>
         )}
 
@@ -111,17 +132,10 @@ export function HUD({
           </div>
         )}
 
-        {/* Fall: warn against overspending before the dormant winter */}
-        {!isPlaying && fallReserveHint && (
+        {/* Fall: explain the automatic canopy drop + warn against overspending */}
+        {!isPlaying && season === 'fall' && (
           <div className={styles.reserveHint}>
-            🍂 Winter ahead is dormant — your tree lives on banked energy until spring. Keep some in reserve.
-          </div>
-        )}
-
-        {/* Fall: shedding feedback — make the resorption benefit visible */}
-        {!isPlaying && shedInfo && shedInfo.count > 0 && (
-          <div className={styles.shedHint}>
-            🍂 Shedding {shedInfo.count} {shedInfo.count === 1 ? 'leaf' : 'leaves'} now banks ~{Math.round(shedInfo.energy)} energy for spring. Left on, winter frost wastes most of it.
+            🍂 Your whole canopy drops automatically at fall's end, banking ~75% of its energy back into the wood. Winter ahead is dormant — keep some energy in reserve to live on until spring.
           </div>
         )}
 
@@ -160,7 +174,26 @@ export function HUD({
                 >
                   {mode === 'leaf' ? '● ' : ''}Leaf
                 </button>
+                {flowerUnlocked && (
+                  <button
+                    className={`${styles.modeBtn} ${mode === 'flower' ? styles.modeBtnActive : ''}`}
+                    onClick={() => onModeChange('flower')}
+                    title="Bloom flowers on healthy branch tips (3⚡ each, spring only) — they set fruit for seeds"
+                  >
+                    {mode === 'flower' ? '● ' : ''}Flower
+                  </button>
+                )}
               </div>
+
+              {season !== 'winter' && (
+                <button
+                  className={styles.autoLeafBtn}
+                  onClick={onAutoLeaf}
+                  title="Fill the open canopy with leaves automatically (spends your full budget in spring/summer; keeps a small reserve in fall)"
+                >
+                  🍃 Fill leaves
+                </button>
+              )}
 
               <button
                 className={styles.advanceBtn}

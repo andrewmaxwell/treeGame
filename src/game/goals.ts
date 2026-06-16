@@ -15,6 +15,8 @@ export interface GoalContext {
   droughtThisSeason: boolean   // the just-simulated season was a drought
   stormThisSeason: boolean     // a storm struck the just-simulated season
   stormCellsLost: number       // cells the season's storm(s) snapped (0 = held firm)
+  seedsThisSeason: number      // seeds harvested in the just-simulated season (fall only)
+  grewFlowerThisTurn: boolean  // the committed plan included ≥1 flower (it's since set/dropped)
 }
 
 export interface Milestone {
@@ -53,9 +55,11 @@ export const MILESTONES: Milestone[] = [
   },
   {
     id: 'shed-leaves',
-    goal: 'Shed your leaves during fall (tap leaves in Leaf mode)',
-    log: 'You drew your canopy back in for the winter.',
-    check: (c) => c.seasonSimulated === 'fall' && c.shedThisTurn,
+    goal: 'Let your canopy fall before winter',
+    log: 'Your canopy fell, its energy drawn back into the wood for winter.',
+    // The whole canopy now drops automatically each fall (resorbing its energy) — this
+    // completes the first time the player simulates a fall season.
+    check: (c) => c.seasonSimulated === 'fall',
   },
   {
     id: 'survive-winter',
@@ -84,7 +88,9 @@ export const MILESTONES: Milestone[] = [
     id: 'first-flower',
     goal: 'Grow your first flower',
     log: 'Your first bloom opened.',
-    check: (c) => has(c.cells, 'flower'),
+    // Flowers set to fruit (or drop) by spring's end, so the post-sim state rarely still
+    // holds a flower — credit the bloom from the committed plan, or any fruit/seed it led to.
+    check: (c) => c.grewFlowerThisTurn || has(c.cells, 'flower') || has(c.cells, 'fruit') || c.score > 0,
   },
   {
     id: 'first-fruit',
@@ -103,6 +109,30 @@ export const MILESTONES: Milestone[] = [
     goal: 'Weather a storm without losing a single cell',
     log: 'A storm raged — and not a single cell fell.',
     check: (c) => c.stormThisSeason && c.stormCellsLost === 0 && c.livingCells > 0,
+  },
+  {
+    id: 'five-seeds',
+    goal: 'Produce 5 seeds in one year',
+    log: 'Five seeds in a single year — a bountiful harvest.',
+    check: (c) => c.seedsThisSeason >= 5,
+  },
+  {
+    id: 'hundred-cells',
+    goal: 'Grow to 100 cells',
+    log: 'A hundred cells — a towering tree.',
+    check: (c) => c.peakCells >= 100,
+  },
+  {
+    id: 'fruit-drought',
+    goal: 'Carry a fruit through a drought summer',
+    log: 'You carried fruit through a parched summer.',
+    check: (c) => c.droughtThisSeason && c.seasonSimulated === 'summer' && has(c.cells, 'fruit'),
+  },
+  {
+    id: 'lifetime-25',
+    goal: 'Produce 25 lifetime seeds',
+    log: 'Twenty-five seeds — a legacy of forests.',
+    check: (c) => c.score >= 25,
   },
 ]
 

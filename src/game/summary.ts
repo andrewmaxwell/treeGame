@@ -69,6 +69,24 @@ export function buildSeasonSummary(
   const cellsLost = Math.max(0, cellsStart - cellsEnd)
 
   const events: string[] = []
+
+  // Reproductive outcomes lead the summary — the harvest is the point of the year.
+  const seedsHarvested = Math.max(0, final.score - committed.score)
+  if (seedsHarvested > 0) {
+    events.push(`🌰 Harvested ${seedsHarvested} ${seedsHarvested === 1 ? 'seed' : 'seeds'}!`)
+  }
+  const fruitStart = count(committed.cells, (c) => c.type === 'fruit')
+  const fruitEnd = count(final.cells, (c) => c.type === 'fruit')
+  const fruitLost = Math.max(0, fruitStart - fruitEnd - seedsHarvested)
+  if (fruitLost > 0) {
+    events.push(`🍂 ${fruitLost} ${fruitLost === 1 ? 'fruit' : 'fruit'} dropped before ripening.`)
+  }
+  const flowerStart = count(committed.cells, (c) => c.type === 'flower')
+  const fruitSet = Math.max(0, fruitEnd - count(committed.cells, (c) => c.type === 'fruit'))
+  if (weather.season === 'spring' && flowerStart > 0) {
+    events.push(`🌸 ${fruitSet} of ${flowerStart} ${flowerStart === 1 ? 'bloom' : 'blooms'} set fruit.`)
+  }
+
   if (weather.isDrought) events.push('A drought gripped the land — soil ran dry.')
   const rainTicks = rainTickCount(weather)
   if (rainTicks > 0 && !weather.isDrought) {

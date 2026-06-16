@@ -27,6 +27,8 @@ function ctx(over: Partial<GoalContext>): GoalContext {
     droughtThisSeason: over.droughtThisSeason ?? false,
     stormThisSeason: over.stormThisSeason ?? false,
     stormCellsLost: over.stormCellsLost ?? 0,
+    seedsThisSeason: over.seedsThisSeason ?? 0,
+    grewFlowerThisTurn: over.grewFlowerThisTurn ?? false,
   }
 }
 

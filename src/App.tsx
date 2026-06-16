@@ -11,6 +11,8 @@ import {
   applySeasonAdvance,
   resolvableShedKeys,
   computeReachable,
+  getValidPlacements,
+  autoFillLeaves,
   bankedEnergy,
   CELL_COST,
   SPRING_VIGOR,
@@ -21,7 +23,6 @@ import { buildSeasonSummary, type SeasonSummaryData } from './game/summary'
 import { evaluateGoals, currentGoal, completedMilestones, type GoalContext } from './game/goals'
 import { computeRemovalSet, pruneCost, seversWholeCanopy } from './game/prune'
 import { loadGame, saveGame, clearSave } from './game/save'
-import { LEAF_SHED_RESORB } from './sim/cells'
 import { Intro } from './ui/Intro'
 import {
   generateWeather,
@@ -86,6 +87,23 @@ function countLiving(cells: Map<string, Cell>): number {
   return n
 }
 
+function hasType(cells: Map<string, Cell>, type: Cell['type']): boolean {
+  for (const c of cells.values()) if (c.type === type) return true
+  return false
+}
+
+// Total water + energy held across all living cells — shown live during playback so the
+// player can watch photosynthesis fill energy and transpiration draw water.
+function sumResources(cells: Map<string, Cell>): { water: number; energy: number } {
+  let water = 0, energy = 0
+  for (const c of cells.values()) {
+    if (c.type === 'tree' || c.type === 'leaf' || c.type === 'flower' || c.type === 'fruit') {
+      water += c.water; energy += c.energy
+    }
+  }
+  return { water, energy }
+}
+
 const TICKS_PER_SECOND = 12
 const MS_PER_TICK = 1000 / TICKS_PER_SECOND
 // Playback holds this long when a storm snaps cells, so the break registers.
@@ -116,7 +134,7 @@ export function App() {
   const [goalLogOpen, setGoalLogOpen]  = useState(false)
   const [inspected, setInspected]      = useState<InspectState | null>(null)
   const [stormFlash, setStormFlash]    = useState<string | null>(null)
-  const [shedInfo, setShedInfo]        = useState<{ count: number; energy: number } | null>(null)
+  const [playStats, setPlayStats]      = useState<{ water: number; energy: number } | null>(null)
   const [showIntro, setShowIntro]      = useState(() => {
     try { return localStorage.getItem('treegame.introSeen') == null } catch { return false }
   })
@@ -169,6 +187,8 @@ export function App() {
         droughtThisSeason: si.weather.isDrought,
         stormThisSeason: si.weather.storm != null,
         stormCellsLost,
+        seedsThisSeason: Math.max(0, finalState.score - si.committed.score),
+        grewFlowerThisTurn: hasType(si.committed.cells, 'flower'),
       }
       const result = evaluateGoals(finalState.goals, ctx)
       nextGoals = result.progress
@@ -205,17 +225,23 @@ export function App() {
     // Autosave the new planning-phase state.
     saveGame(gameRef.current)
 
+    // Flower mode is spring-only; leaving spring drops back to Wood so the toggle and
+    // placement stay coherent.
+    if (finalState.season !== 'spring' && modeRef.current === 'flower') {
+      setMode('branch'); modeRef.current = 'branch'
+    }
+
     setSeasonYear({ season: finalState.season, year: finalState.year })
     setForecast(makeForecast(gameRef.current))
     setScore(gameRef.current.score)
     setGoalsView(goalsViewOf(gameRef.current))
     setInspected(null)
-    setShedInfo(null)
     setEnergy(newPlanning.energyAvailable)
     setEnergyTotal(newPlanning.energyAvailable)
     setCanAdvance(true)
     setIsPlaying(false)
     setProgress(0)
+    setPlayStats(null)
     canvasRef.current?.requestDraw()
   }, [])
 
@@ -238,6 +264,7 @@ export function App() {
       gameRef.current = pb.frames[pb.frameIdx]
       canvasRef.current?.requestDraw()
       setProgress(pb.frameIdx / (pb.frames.length - 1))
+      setPlayStats(sumResources(gameRef.current.cells))
 
       // Highlight any storm break we just reached: shake, flash, and pause a beat.
       let paused = false
@@ -269,6 +296,7 @@ export function App() {
     setStormFlash(null)
     setIsPlaying(true)
     setProgress(0)
+    setPlayStats(sumResources(frames[0].cells))
     pb.rafId = requestAnimationFrame(advancePlayback)
   }, [advancePlayback])
 
@@ -284,19 +312,14 @@ export function App() {
     setEnergy(p.energyAvailable - p.energySpent)
     const reachable = computeReachable(p.stagedCells, gameRef.current)
     setCanAdvance(reachable.size === p.stagedCells.size)
-    // Estimated energy resorbed from leaves marked to shed this fall — surfaced so the
-    // player can see shedding is worth more than letting winter frost take them.
-    const shedKeys = resolvableShedKeys(gameRef.current, p)
-    let e = 0
-    for (const k of shedKeys) e += gameRef.current.cells.get(k)?.energy ?? 0
-    setShedInfo(shedKeys.size > 0 ? { count: shedKeys.size, energy: e * LEAF_SHED_RESORB } : null)
   }, [])
 
   const onTap = useCallback((q: number, r: number) => {
     if (isPlaying) return
     const result = handleTap(q, r, modeRef.current, gameRef.current, planningRef.current)
 
-    if (result.kind === 'rejected_rock' || result.kind === 'rejected_energy' || result.kind === 'rejected_adjacent') {
+    if (result.kind === 'rejected_rock' || result.kind === 'rejected_energy' ||
+        result.kind === 'rejected_adjacent' || result.kind === 'rejected_winter') {
       canvasRef.current?.triggerShake()
       return
     }
@@ -382,6 +405,16 @@ export function App() {
     canvasRef.current?.requestDraw()
   }, [])
 
+  // Fill the open canopy with leaves in one tap (keeps a small reserve), so a big budget
+  // doesn't mean dozens of manual placements. The player still shapes trunk/roots by hand.
+  const onAutoLeaf = useCallback(() => {
+    if (isPlaying) return
+    setInspected(null)
+    planningRef.current = autoFillLeaves(gameRef.current, planningRef.current)
+    syncDisplay(planningRef.current)
+    canvasRef.current?.requestDraw()
+  }, [isPlaying, syncDisplay])
+
   // Plant a new seed: clear the save and reset every bit of run state. Guarded by a
   // confirm because it discards the current tree.
   const onNewGame = useCallback(() => {
@@ -411,7 +444,6 @@ export function App() {
     setGoalsView(goalsViewOf(fresh))
     setInspected(null)
     setStormFlash(null)
-    setShedInfo(null)
     canvasRef.current?.recenter()
     canvasRef.current?.requestDraw()
   }, [])
@@ -426,23 +458,26 @@ export function App() {
   // to grow new ones to restart photosynthesis. This is the single most confusing
   // moment for new players, so call it out explicitly.
   const planningSeason = seasonYear.season
-  let leafCount = 0, woodCount = 0
+
+  // Flower mode unlocks in spring once the tree has reached 30 cells (milestone 6).
+  const flowerUnlocked =
+    planningSeason === 'spring' && gameRef.current.goals.completed.includes('thirty-cells')
+
+  // In flower mode with nowhere to bloom, tell the player WHY (the #1 flower confusion):
+  // blooms need a healthy branch (>60%) with an open or leafy hex beside it.
+  const flowerNoSpots =
+    !isPlaying && flowerUnlocked && mode === 'flower' &&
+    getValidPlacements('flower', gameRef.current, planningRef.current).size === 0
+
+  let leafCount = 0
   for (const c of gameRef.current.cells.values()) {
     if (c.type === 'leaf') leafCount++
-    else if (c.type === 'tree') woodCount++
   }
   const leafless = leafCount === 0
   // Only prompt to re-leaf if the tree has actually grown a leaf before (the first-leaf
   // milestone) — never on a brand-new seed that has simply never had leaves yet.
   const hasGrownLeavesBefore = gameRef.current.goals.completed.includes('first-leaf')
   const springReLeaf = !isPlaying && planningSeason === 'spring' && leafless && hasGrownLeavesBefore
-
-  // Fall reserve warning: winter is dormant (no photosynthesis), so the tree survives
-  // on banked energy alone — roughly woodCount × 0.3 to last the season, plus a margin
-  // to re-leaf in spring. If you've drawn your reserves below that, you're spending
-  // toward a hungry winter. Teaches "bank energy before the cold" — only when at risk.
-  const fallReserveHint =
-    !isPlaying && planningSeason === 'fall' && energyRemaining < woodCount * 0.5
 
   // Gentle unspent-energy nudge: early years, growth seasons only (hoarding into
   // fall/winter is correct, so it's suppressed there). Suppressed when the more
@@ -479,13 +514,15 @@ export function App() {
         completedGoals={goalsView.completedCount}
         showNudge={showNudge}
         springReLeaf={springReLeaf}
-        fallReserveHint={fallReserveHint}
-        shedInfo={planningSeason === 'fall' ? shedInfo : null}
+        flowerNoSpots={flowerNoSpots}
         mode={mode}
+        flowerUnlocked={flowerUnlocked}
         canAdvance={canAdvance}
         isPlaying={isPlaying}
         playbackProgress={playbackProgress}
+        playbackStats={playStats}
         onModeChange={onModeChange}
+        onAutoLeaf={onAutoLeaf}
         onAdvanceSeason={onAdvanceSeason}
         onSkip={onSkip}
         onOpenGoals={() => setGoalLogOpen(true)}

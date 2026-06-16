@@ -9,6 +9,7 @@ export interface Cell {
   health: number   // 0.0–1.0
   rot: number      // 0.0–1.0
   age: number      // seasons alive
+  maturity?: number // fruit only: 0.0–1.0 ripeness; ≥1 ripens to a seed, ≤0 aborts
   staged?: boolean
 }
 
@@ -23,3 +24,17 @@ export const CELL_ENERGY_CAP = 10
 // tree that produced well in summer can re-leaf in spring instead of starving.
 export const LEAF_SHED_RESORB = 0.75   // fall planning shed
 export const LEAF_FROST_RESORB = 0.3   // winter-onset drop
+
+// ─── Reproductive cycle (Milestone 9) ──────────────────────────────────────────
+// A flower sets to fruit at spring's end only if its health cleared this bar (a weak
+// spring tree blooms but loses the flowers to drop — the first filter).
+export const FLOWER_SET_HEALTH = 0.5
+// A new fruit starts here, leaving room to fall (abort) before reaching ripeness.
+export const FRUIT_START_MATURITY = 0.15
+// Per-tick maturity change, gated by the fruit's own water (transpiration is fierce in
+// summer). Well-fed it ripens; thirsty it visibly regresses; abort at ≤0, ripen at ≥1.
+export const FRUIT_FED_WATER = 2       // water ≥ this → ripening
+export const FRUIT_THIRSTY_WATER = 1   // water < this → regressing
+export const FRUIT_RIPEN_RATE = 0.025  // +maturity/tick when fed
+export const FRUIT_DECLINE_RATE = 0.04 // −maturity/tick when thirsty (faster than it builds)
+export const FRUIT_RIPE = 1.0          // maturity at which a fruit is harvestable

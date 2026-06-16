@@ -1,5 +1,9 @@
 import type { Cell, CellType } from './cells'
-import { CELL_WATER_CAP, CELL_ENERGY_CAP, SOIL_WATER_CAP, LEAF_FROST_RESORB, LEAF_SHED_RESORB } from './cells'
+import {
+  CELL_WATER_CAP, CELL_ENERGY_CAP, SOIL_WATER_CAP, LEAF_FROST_RESORB, LEAF_SHED_RESORB,
+  FLOWER_SET_HEALTH, FRUIT_START_MATURITY, FRUIT_FED_WATER, FRUIT_THIRSTY_WATER,
+  FRUIT_RIPEN_RATE, FRUIT_DECLINE_RATE, FRUIT_RIPE,
+} from './cells'
 import { hexKey, HEX_NEIGHBORS } from './grid'
 import { surfaceR } from './terrain'
 import type { RNG } from './rng'
@@ -167,6 +171,31 @@ export function computeLight(state: GameState, sunAngleDeg: number): Map<string,
   return light
 }
 
+// Energy a leaf generates per tick = remaining_light × season_intensity × PHOTO_COEFF ×
+// heightLightFactor. PHOTO_COEFF was raised 0.12 → 0.24: at 0.12 a leaf shaded even
+// modestly (and most of a canopy self-shades at 35% absorption/cell) netted barely above
+// its 0.02 upkeep, so a normal tree never banked the surplus that flowering needs — every
+// playthrough collapsed to a 0-energy, health-0.5 "zombie" that could not set fruit.
+export const PHOTO_COEFF = 0.24
+
+// Lifted leaves catch more sun than ground-hugging ones. This is the REASON to grow tall:
+// without it, sprawling a flat mat along the surface (no self-shading, every leaf in full
+// sun, short water paths) was a dominant exploit — a ground-crawler scored ~4× a normal
+// tree in the harness and never died. A leaf at the surface gets LIGHT_GROUND_FACTOR of
+// its light; full value is reached LIGHT_FULL_HEIGHT cells up. So height now trades off
+// against the trunk throughput needed to water a tall canopy — the intended core loop.
+// Retuned 0.40 → 0.22 alongside the wood-upkeep drop (see metabolize). With wood upkeep
+// now near-zero, a flat ground-hugging sprawl (the crawler) became cheap again and needed
+// a firmer light penalty to stay suppressed; 0.22 keeps the crawler the worst strategy
+// while a mid-height balanced canopy (height 5–7 → factor 0.6–0.76) is barely affected.
+export const LIGHT_GROUND_FACTOR = 0.22
+export const LIGHT_FULL_HEIGHT = 10
+function heightLightFactor(q: number, r: number): number {
+  const h = surfaceR(q) - r  // cells above the surface
+  if (h <= 0) return LIGHT_GROUND_FACTOR
+  return Math.min(1, LIGHT_GROUND_FACTOR + (h / LIGHT_FULL_HEIGHT) * (1 - LIGHT_GROUND_FACTOR))
+}
+
 // Photosynthesis: leaf cells turn light into energy. Non-leaf cells receive energy
 // only via diffusion — so canopy structure, not bulk, drives the energy economy.
 export function photosynthesize(state: GameState, light: Map<string, number>, intensity: number): GameState {
@@ -175,7 +204,7 @@ export function photosynthesize(state: GameState, light: Map<string, number>, in
     if (cell.type !== 'leaf') continue
     const ll = light.get(key)
     if (ll === undefined) continue
-    const gain = ll * intensity * 0.12
+    const gain = ll * intensity * PHOTO_COEFF * heightLightFactor(cell.q, cell.r)
     if (gain <= 0) continue
     work.set(key, { ...cell, energy: Math.min(cell.energy + gain, CELL_ENERGY_CAP) })
   }
@@ -191,7 +220,14 @@ function metabolize(state: GameState, mult: number): GameState {
   for (const [key, cell] of state.cells) {
     let w = 0, e = 0
     switch (cell.type) {
-      case 'tree':   w = 0.05; e = 0.015; break
+      // Wood energy upkeep retuned 0.015 → 0.005. Now that wood HEALTH no longer depends on
+      // energy (see updateHealth), this upkeep only taxes banked energy — and at 0.015 it
+      // drained a small tree's whole summer surplus over fall (full-metabolism fall, canopy
+      // still up) every year, trapping recovering/pruned trees in subsistence (they could
+      // sustain but never re-bank a fall-surviving reserve). At 0.005 a modest canopy banks
+      // a surplus that snowballs, so a brutally-pruned tree genuinely recovers (verified in
+      // cli/recover.ts: spring budget climbs 8→14→29→49…). Structure is now cheap to keep.
+      case 'tree':   w = 0.05; e = 0.005; break
       case 'leaf':   w = 0.10; e = 0.02; break
       case 'flower': w = 0.15; e = 0.10; break
       case 'fruit':  w = 0.20; e = 0.05; break
@@ -244,9 +280,17 @@ export function absorbWater(state: GameState, rng: RNG): GameState {
   return { ...state, cells: work }
 }
 
+// Fraction of a pair's resource difference that moves per tick (before the flow cap).
+// Conduction must be low-RESISTANCE so the per-cell 2-units/tick flow CAP — not gradient
+// resistance — is the real throughput limit; that's what makes trunk WIDTH matter while
+// still letting a tall trunk water its canopy. At 0.15 (the original value) gradient
+// resistance dominated and any tree taller than ~6 rows starved its own canopy no matter
+// how wide the trunk (verified in cli/experiments.ts). 0.5 saturates the cap quickly.
+export const DIFFUSE_RATE = 0.5
+
 // Generic single-pass diffusion across adjacent exchangeable pairs. Both water and
-// energy diffusion share this: same 0.15 flow rate, same shuffled-pair order, same
-// per-cell in/out budget. The resource-specific bits are injected via `cfg`.
+// energy diffusion share this: same flow rate, same shuffled-pair order, same per-cell
+// in/out budget. The resource-specific bits are injected via `cfg`.
 interface DiffuseConfig {
   get: (c: Cell) => number              // current amount of the resource
   set: (c: Cell, v: number) => Cell     // return a copy with the resource set to v
@@ -298,7 +342,7 @@ function diffuse(state: GameState, rng: RNG, cfg: DiffuseConfig): GameState {
     const recv   = work.get(rKey)!
 
     const flow = Math.min(
-      Math.abs(diff) * 0.15,
+      Math.abs(diff) * DIFFUSE_RATE,
       outBudget.get(sKey)!,
       inBudget.get(rKey)!,
       cfg.capacity(recv) - cfg.get(recv),
@@ -338,18 +382,38 @@ export function diffuseEnergy(state: GameState, rng: RNG): GameState {
   })
 }
 
-// Health update: each living cell's health lerps toward a target set by its
-// water/energy supply. The lerp (not a fixed step) makes both decline and recovery
-// gradual and slowing — trouble is visible long before death (CLAUDE.md "slow drama").
+// Health update: each living cell's health lerps toward a target set by its supply.
+// The lerp (not a fixed step) makes both decline and recovery gradual and slowing —
+// trouble is visible long before death (CLAUDE.md "slow drama").
+//
+// Crucially the supply test is TYPE-AWARE:
+//  • Wood (tree, trunk + roots) is mostly dead structural scaffolding with living sapwood
+//    that just needs WATER moving through it — its health does NOT depend on energy. Energy
+//    is the growth/reproduction currency (the planning budget), free to pool in the canopy
+//    where photosynthesis makes it; a root at energy 0 sitting in wet soil is perfectly
+//    healthy. (Before this, every wood cell needed energy>2, so energy made at the leaves
+//    had to crawl all the way down to the roots — it never did, and every tree sat pinned
+//    at health 0.5 with starved roots. That was both unrealistic and not fun.)
+//  • Leaves / flowers / fruit are the metabolically active loads and need BOTH water and
+//    energy — preserving the real challenges (watering a lifted canopy; feeding fruit out
+//    on a far limb).
 const DEATH_THRESHOLD = 0.001
+export const WOOD_WATER_OK = 3      // wood at/above this water → full health
+export const WOOD_WATER_MIN = 0.5   // wood below this → dying
 export function updateHealth(state: GameState): GameState {
   const work = new Map(state.cells)
   for (const [key, cell] of state.cells) {
     if (cell.type === 'deadwood' || cell.type === 'soil' || cell.type === 'rock') continue
 
-    const hasWater  = cell.water  > 3
-    const hasEnergy = cell.energy > 2
-    const target = hasWater && hasEnergy ? 1.0 : hasWater || hasEnergy ? 0.5 : 0.0
+    let target: number
+    if (cell.type === 'tree') {
+      // Water-driven only — see note above.
+      target = cell.water > WOOD_WATER_OK ? 1.0 : cell.water > WOOD_WATER_MIN ? 0.5 : 0.0
+    } else {
+      const hasWater  = cell.water  > 3
+      const hasEnergy = cell.energy > 2
+      target = hasWater && hasEnergy ? 1.0 : hasWater || hasEnergy ? 0.5 : 0.0
+    }
 
     const health = cell.health + (target - cell.health) * 0.01
 
@@ -368,7 +432,25 @@ export function updateHealth(state: GameState): GameState {
   return { ...state, cells: work }
 }
 
-// Stub: rot spread (Milestone 9)
+// Fruit maturation (Milestone 9): each tick a fruit's ripeness moves by its own water
+// supply — fierce summer transpiration (0.20/tick) means a poorly-fed fruit can't keep
+// up and visibly regresses. Well-fed it ripens toward FRUIT_RIPE; starved it slips to 0
+// and aborts (drops, no seed). This is the central summer gamble: how many fruit can the
+// roots actually carry through August. Runs after diffusion so water reflects the tick.
+export function matureFruit(state: GameState): GameState {
+  const work = new Map(state.cells)
+  for (const [key, cell] of state.cells) {
+    if (cell.type !== 'fruit') continue
+    let m = cell.maturity ?? FRUIT_START_MATURITY
+    if (cell.water >= FRUIT_FED_WATER) m = Math.min(FRUIT_RIPE, m + FRUIT_RIPEN_RATE)
+    else if (cell.water < FRUIT_THIRSTY_WATER) m -= FRUIT_DECLINE_RATE
+    if (m <= 0) work.delete(key)              // aborted — dropped, no seed
+    else work.set(key, { ...cell, maturity: m })
+  }
+  return { ...state, cells: work }
+}
+
+// Stub: rot spread (deferred — see CLAUDE.md Decisions Deferred)
 function spreadRot(state: GameState, _rng: RNG): GameState { return state }
 
 // Storm structural-failure check (one storm tick). Every above-ground wood cell whose
@@ -418,19 +500,20 @@ function updateSoil(state: GameState, weather: SeasonWeather, tick: number): Gam
   return { ...state, cells: work }
 }
 
-// Winter onset (first tick of winter): kills any growth placed during the winter
-// planning phase (age 0). The canopy itself normally came down at fall's end (see
-// resolveAutumnDrop), so entering winter the tree is already bare — but this stays a
+// Winter onset (first tick of winter): frost kills any ABOVE-GROUND growth placed during
+// the winter planning phase (age 0). The canopy itself normally came down at fall's end
+// (see resolveAutumnDrop), so entering winter the tree is already bare — but this stays a
 // backstop: any leaf/flower/fruit still present at winter onset drops here too (a leaf
-// resorbing the low frost fraction).
+// resorbing the low frost fraction). Underground roots are INSULATED — new winter roots
+// (age 0, below the surface) survive, which is the one constructive winter action.
 function winterFrost(state: GameState): GameState {
   const work = new Map(state.cells)
   for (const [key, cell] of state.cells) {
     if (cell.type === 'leaf' || cell.type === 'flower' || cell.type === 'fruit') {
       if (cell.type === 'leaf') depositResorb(work, cell, cell.energy * LEAF_FROST_RESORB)
       work.delete(key)
-    } else if (cell.type === 'tree' && cell.age === 0) {
-      work.delete(key)
+    } else if (cell.type === 'tree' && cell.age === 0 && cell.r < surfaceR(cell.q)) {
+      work.delete(key)  // above-ground winter growth frost-kills; roots are spared
     }
   }
   return { ...state, cells: work }
@@ -469,24 +552,56 @@ function resolveShedding(state: GameState, shedKeys: Set<string>): GameState {
   return { ...state, cells: work }
 }
 
-// The deciduous drop, resolved at the END of FALL: the WHOLE canopy comes down. Leaves
-// the player marked to shed resorb LEAF_SHED_RESORB (75%); the rest resorb only
-// LEAF_FROST_RESORB (30%) — so shedding is always the better play, and now visibly so.
-// Either way the leaves photosynthesized all fall first (this runs after the last tick).
-//
-// Crucially the canopy drops HERE, entering winter, not at winter's first tick. So the
-// winter planning budget already reflects the tree's true overwintering reserves — no
-// phantom leaf energy that is about to vanish to frost (which read like a bug: "13 in
-// winter, 3 in spring"). Winter is now honestly a bare-tree, live-on-reserves season.
-function resolveAutumnDrop(state: GameState, shedKeys: Set<string>): GameState {
+// The deciduous drop, resolved at the END of FALL: the WHOLE canopy comes down and EVERY
+// leaf resorbs LEAF_SHED_RESORB (75%) of its energy into the wood — automatically, no
+// manual marking. (Originally the player had to tap each leaf to "shed" it for the good
+// resorb rate, with un-shed leaves keeping only 30%; but since shedding everything was
+// always strictly best, that was a pure busywork tax — playtesters reasonably asked why
+// it wasn't automatic. It is now.) The leaves photosynthesized all fall first (this runs
+// after the last tick), and the tree enters winter bare, on honest overwintering reserves.
+function resolveAutumnDrop(state: GameState): GameState {
   const work = new Map(state.cells)
   for (const [key, cell] of state.cells) {
     if (cell.type !== 'leaf') continue
-    const rate = shedKeys.has(key) ? LEAF_SHED_RESORB : LEAF_FROST_RESORB
-    depositResorb(work, cell, cell.energy * rate)
+    depositResorb(work, cell, cell.energy * LEAF_SHED_RESORB)
     work.delete(key)
   }
   return { ...state, cells: work }
+}
+
+// Fruit set, resolved at the END of SPRING (after the last spring tick, like the autumn
+// drop): every flower that kept its health above FLOWER_SET_HEALTH pollinates into a
+// fruit; weaker flowers drop (a wasted 3-energy bloom — the spring lesson). New fruit
+// start at FRUIT_START_MATURITY and carry that progress into the summer planning save.
+export function setFruit(state: GameState): GameState {
+  const work = new Map(state.cells)
+  for (const [key, cell] of state.cells) {
+    if (cell.type !== 'flower') continue
+    if (cell.health > FLOWER_SET_HEALTH) {
+      work.set(key, { ...cell, type: 'fruit', maturity: FRUIT_START_MATURITY })
+    } else {
+      work.delete(key)
+    }
+  }
+  return { ...state, cells: work }
+}
+
+// Harvest, resolved at the START of FALL (tick 0, like winter's frost): every fruit that
+// reached ripeness yields one seed (score +1, flat); any fruit still short of ripe drops
+// unharvested. Either way no fruit survives into fall — summer is the whole gauntlet.
+// Returns the count harvested so the season summary can celebrate the haul.
+export function ripenFruit(state: GameState): { state: GameState; harvested: number } {
+  const work = new Map(state.cells)
+  let harvested = 0
+  let hadFruit = false
+  for (const [key, cell] of state.cells) {
+    if (cell.type !== 'fruit') continue
+    hadFruit = true
+    if ((cell.maturity ?? 0) >= FRUIT_RIPE) harvested++
+    work.delete(key)  // every fruit leaves the tree at fall onset — ripe or not
+  }
+  if (!hadFruit) return { state, harvested: 0 }
+  return { state: { ...state, cells: work, score: state.score + harvested }, harvested }
 }
 
 // Age every living cell (and deadwood) by one season. Runs once, after the last
@@ -519,6 +634,9 @@ function runTick(state: GameState, rng: RNG, weather: SeasonWeather, tick: numbe
   let s = state
   // Winter onset frost happens before anything else on the first tick.
   if (tick === 0 && weather.season === 'winter') s = winterFrost(s)
+  // Fall onset harvest: ripe fruit becomes seeds, the rest drops (before the canopy
+  // photosynthesizes fall — the fruit's work was done over summer).
+  if (tick === 0 && weather.season === 'fall') s = ripenFruit(s).state
 
   const raining = weather.rain[tick]
   const light = computeLight(s, weather.sunAngleDeg)
@@ -531,6 +649,7 @@ function runTick(state: GameState, rng: RNG, weather: SeasonWeather, tick: numbe
   s = diffuseWater(s, rng)
   s = diffuseEnergy(s, rng)
   s = updateHealth(s)
+  s = matureFruit(s)
   s = spreadRot(s, rng)
   s = updateSoil(s, weather, tick)
 
@@ -570,10 +689,14 @@ export function runSeason(
     if (res.break) storms.push({ frame: tick, ...res.break })
   }
   if (frames.length > 0) {
-    // Fall: the whole canopy drops (deciduous). Any other season: only stray shed marks.
+    // Fall: the whole canopy drops automatically (deciduous), every leaf resorbing the
+    // full rate. Any other season: only the leaves the player explicitly marked to shed.
     let last = weather.season === 'fall'
-      ? resolveAutumnDrop(frames[frames.length - 1], shedKeys as Set<string>)
+      ? resolveAutumnDrop(frames[frames.length - 1])
       : resolveShedding(frames[frames.length - 1], shedKeys as Set<string>)
+    // Spring: surviving flowers pollinate into fruit (the rest drop). After shedding so a
+    // stray spring shed resolves first; flowers and leaves don't interact.
+    if (weather.season === 'spring') last = setFruit(last)
     last = ageCells(last)
     frames[frames.length - 1] = last
   }

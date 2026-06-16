@@ -100,12 +100,15 @@ describe('multi-year deciduous recovery', () => {
     expect(alive).toBe(true)
   })
 
-  it('a tree starved to 0 energy can still recover via the spring vigor floor', () => {
+  it('a tree starved toward 0 energy can still recover via the spring vigor floor', () => {
     // Build ONLY wood in spring Y1 (no leaves) — the classic new-player trap. With no
-    // photosynthesis the tree drains to 0 and would softlock forever. Re-leafing each
-    // spring (funded by the vigor floor) must pull it back to positive production.
+    // photosynthesis the tree drains down and, leafless, can't afford the 1 energy a leaf
+    // costs without the floor. Re-leafing each spring (funded by the vigor floor) must pull
+    // it back to positive, snowballing production. (Since wood upkeep dropped to 0.005 the
+    // drain is gentle — the tree leans on the floor rather than hitting an exact 0, but the
+    // recovery story is the same: it depends on the floor, then climbs well past it.)
     let game = seedState()
-    let starved = false
+    let leanedOnFloor = false
     let recovered = false
 
     for (let i = 0; i < 8; i++) {
@@ -120,12 +123,12 @@ describe('multi-year deciduous recovery', () => {
         if (g.season === 'spring') return reLeaf(g, pl)
         return pl
       })
-      if (bankedEnergy(game.cells) === 0) starved = true
-      if (starved && bankedEnergy(game.cells) > SPRING_VIGOR) recovered = true
+      if (bankedEnergy(game.cells) <= SPRING_VIGOR) leanedOnFloor = true
+      if (leanedOnFloor && bankedEnergy(game.cells) > SPRING_VIGOR + 2) recovered = true
     }
 
-    expect(starved).toBe(true)     // it really did hit zero (the trap)
-    expect(recovered).toBe(true)   // …and climbed back out (banked > vigor floor again)
+    expect(leanedOnFloor).toBe(true)  // it really did drain to where only the floor saved it
+    expect(recovered).toBe(true)      // …and climbed back out, banking well past the floor
     expect([...game.cells.values()].some((c) => c.type === 'tree')).toBe(true)  // still alive
   })
 

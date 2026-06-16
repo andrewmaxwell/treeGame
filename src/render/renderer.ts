@@ -1,6 +1,6 @@
 import { hexToPixel, hexKey, HEX_NEIGHBORS } from '../sim/grid'
 import type { Cell } from '../sim/cells'
-import type { TerrainGen } from '../sim/terrain'
+import { surfaceR, type TerrainGen } from '../sim/terrain'
 import { worldToScreen, type Camera } from './camera'
 import { cellColor } from './colors'
 
@@ -24,7 +24,7 @@ export function drawScene(
   terrain: TerrainGen,
   stagedCells: Map<string, Cell>,
   shedMarked: Set<string>,
-  validPlacements: Map<string, 'tree' | 'leaf'>,
+  validPlacements: Map<string, 'tree' | 'leaf' | 'flower'>,
   // Light level (0–1) per leaf cell key — drives the per-leaf sun indicator during
   // planning. Empty during playback. Includes staged leaves (prospective shading).
   leafLight: Map<string, number>,
@@ -108,10 +108,17 @@ export function drawScene(
       const { x: wx, y: wy } = hexToPixel(vq, vr, BASE_RADIUS)
       const { sx, sy } = worldToScreen(wx, wy, camera, width, height)
       if (sx < -r * 2 || sx > width + r * 2 || sy < -r * 2 || sy > height + r * 2) continue
-      // Kept very subtle: a faint dotted hint of where growth may go, not a solid grid.
-      const stroke = vpType === 'leaf' ? 'rgba(120,200,120,0.22)' : 'rgba(190,150,100,0.20)'
+      // Underground wood placements are ROOT spots — over tan soil the faint above-ground
+      // hint vanishes, so give roots a higher-contrast warm outline + fill so players see
+      // they can dig down. Leaf/flower/above-ground wood keep the subtle dotted hint.
+      const underground = vpType === 'tree' && vr >= surfaceR(vq)
+      const stroke = vpType === 'leaf' ? 'rgba(120,200,120,0.22)'
+        : vpType === 'flower' ? 'rgba(255,170,176,0.40)'
+        : underground ? 'rgba(255,212,150,0.7)' : 'rgba(190,150,100,0.20)'
       hexPath(ctx, sx, sy, r * 0.92)
-      ctx.fillStyle = vpType === 'leaf' ? 'rgba(76,175,80,0.04)' : 'rgba(160,115,65,0.04)'
+      ctx.fillStyle = vpType === 'leaf' ? 'rgba(76,175,80,0.04)'
+        : vpType === 'flower' ? 'rgba(255,170,176,0.08)'
+        : underground ? 'rgba(110,70,30,0.30)' : 'rgba(160,115,65,0.04)'
       ctx.fill()
       ctx.strokeStyle = stroke
       ctx.lineWidth = Math.max(0.5, camera.zoom)

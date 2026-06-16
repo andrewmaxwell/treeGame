@@ -21,8 +21,12 @@ export function cellColor(cell: Cell): string {
     }
     case 'flower':
       return healthTint('#FFAAB0', cell.health)
-    case 'fruit':
-      return healthTint('#E8703A', cell.health)
+    case 'fruit': {
+      // Ramp from green-tinged (unripe) to orange-red (ripe) by maturity, so a fruit's
+      // progress reads at a glance during the summer-carry playback.
+      const m = Math.max(0, Math.min(1, cell.maturity ?? 1))
+      return healthTint(lerpColor('#9CCC65', '#E8703A', m), cell.health)
+    }
     case 'deadwood':
       return '#8B7355'
   }

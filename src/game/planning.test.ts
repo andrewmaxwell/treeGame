@@ -3,6 +3,7 @@ import {
   createPlanningState,
   handleTap,
   applySeasonAdvance,
+  autoFillLeaves,
   bankedEnergy,
   type PlanningState,
 } from './planning'
@@ -130,6 +131,35 @@ describe('applySeasonAdvance — energy economy', () => {
     const after = applySeasonAdvance(game, createPlanningState(5))
     expect(after.season).toBe('spring')
     expect(after.year).toBe(4)
+  })
+})
+
+// ─── auto-fill leaves: season-aware reserve ──────────────────────────────────
+describe('autoFillLeaves — season-aware reserve', () => {
+  // A trunk reaching well above ground so there are plenty of valid leaf spots; a big
+  // budget so the reserve fraction is what bounds spending, not the spot count.
+  function trunkState(season: GameState['season']): GameState {
+    const cells: Cell[] = [mkCell(0, 0, 'tree')]
+    for (let r = -1; r >= -6; r--) cells.push(mkCell(0, r, 'tree'))
+    return { ...makeState(cells), season }
+  }
+
+  // Budget 12 with the leaf cost of 1 each: small enough that the reserve fraction (not
+  // the spot count) is what bounds spending, so spring (0 reserve) vs fall (0.15) differ.
+  it('spends its full budget in spring (no reserve held back)', () => {
+    const after = autoFillLeaves(trunkState('spring'), createPlanningState(12))
+    expect(after.energySpent).toBe(12)
+  })
+
+  it('keeps a reserve in fall', () => {
+    const after = autoFillLeaves(trunkState('fall'), createPlanningState(12))
+    expect(after.energySpent).toBeLessThan(12)          // ~10–11: stops at the 15% reserve
+    expect(after.energySpent).toBeGreaterThanOrEqual(10)
+  })
+
+  it('does nothing in winter', () => {
+    const after = autoFillLeaves(trunkState('winter'), createPlanningState(12))
+    expect(after.energySpent).toBe(0)
   })
 })
 
