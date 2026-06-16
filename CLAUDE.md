@@ -243,6 +243,21 @@ Same formula and caps as water. Flows only among tree, leaf, flower, and fruit c
 | Fruit | 0.20 | 0.05 |
 | Deadwood | 0 | 0 |
 
+**Stomatal closure (M9 Round 4):** a water-stressed leaf/fruit throttles its transpiration —
+`water consumption × stomataFactor(cell.water)`, where `stomataFactor` is 1 at water ≥
+`STOMA_FULL` (2) and ramps to `STOMA_MIN` (0.15) as water → 0. As a canopy dries, its demand
+falls with its supply, so it **stabilises at low-but-alive water under drought** instead of
+transpiring itself to 0 and dropping. This gives a tall canopy a fighting chance in a dry
+spell (before it, deep roots were *not* an effective canopy-drought defence — the deep water
+is consumed climbing the trunk and the water table itself depletes, so sustained drought
+gutted the canopy with no counterplay). Truly extreme sustained drought (soil genuinely
+empty) can still kill — counterplay is deep roots + not over-building height. Deliberately
+**only throttles transpiration, not photosynthesis** — coupling carbon to leaf water starved
+recovering trees (small canopy runs lowish on water) and broke the recovery snowball; energy
+income stays purely light-driven. `STOMA_FULL = 2` so only genuinely dry cells throttle; a
+normal canopy (water 3–9) is untouched, leaving fair-weather balance unchanged. Validated in
+`cli/water.ts` (drought canopy survival) and the `play.ts`/`recover.ts` sweeps.
+
 Heat wave: leaf and fruit water consumption × 1.8.
 Winter: all consumption × 0.35 (dormancy), but photosynthesis is near zero too.
 
@@ -912,11 +927,18 @@ trap so a brutally-pruned tree *snowballs* back (item #5 — "is it game over?":
 New harness tool `cli/recover.ts` guards the recovery snowball; `cli/experiments.ts` now
 reports per-band health for tall trees.
 
-Across the strategy sweep the balanced grower (~17 seeds/10y) cleanly beats tall (~9),
-over-flowering (~9) and the ground-crawler (~6) — strategy matters and the exploit is dead,
+Across the strategy sweep the balanced grower (~17–19 seeds/10y) cleanly beats tall (~9),
+over-flowering (~11) and the ground-crawler (~6) — strategy matters and the exploit is dead,
 while every band of a tall tree (leaves, canopy wood, mid-trunk, roots) now stays healthy.
-**Use this harness (`play.ts`, `experiments.ts`, `recover.ts`) to validate any future
-balance change before shipping it.**
+
+**Round 4** (drought canopy + summary legibility, from a Fall-Y4 drought screenshot):
+(14) **Stomatal closure** — a water-stressed canopy throttles transpiration so it survives
+drought instead of crashing to 0 (see Metabolic consumption; new diagnostic `cli/water.ts`,
+which proved deep roots alone were *not* a canopy-drought defence). (15) The season-summary
+delta colour was hard-coded green, so a storm's **−95 living cells read as a "good" green** —
+now sign-aware (green gain / red loss / grey neutral) for both energy and cells.
+**Use this harness (`play.ts`, `experiments.ts`, `recover.ts`, `water.ts`) to validate any
+future balance change before shipping it.**
 
 ### Deferred — Rot
 (Was Milestone 9; moved to Decisions Deferred.) Infection sites, spread, free pruning of

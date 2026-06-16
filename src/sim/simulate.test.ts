@@ -10,6 +10,9 @@ import {
   PHOTO_COEFF,
   LIGHT_GROUND_FACTOR,
   LIGHT_FULL_HEIGHT,
+  stomataFactor,
+  STOMA_FULL,
+  STOMA_MIN,
 } from './simulate'
 import { mulberry32 } from './rng'
 import { generateWeather, TICKS_PER_SEASON, type SeasonWeather, type StormSeverity } from './weather'
@@ -245,6 +248,38 @@ describe('photosynthesize', () => {
     const expectedFactor = LIGHT_GROUND_FACTOR + (1 / LIGHT_FULL_HEIGHT) * (1 - LIGHT_GROUND_FACTOR)
     expect(gained).toBeLessThan(PHOTO_COEFF)                              // dimmed vs full height
     expect(gained).toBeCloseTo(PHOTO_COEFF * expectedFactor, 5)          // exactly the ground dimming
+  })
+
+  it('photosynthesis is NOT throttled by leaf water (carbon stays light-driven)', () => {
+    // Coupling carbon to water would starve recovering trees — energy income must not
+    // depend on how wet the leaf is. A bone-dry lifted leaf still photosynthesizes fully.
+    const state = makeState([mkCell(0, -10, 'leaf', { energy: 0, water: 0 })])
+    const after = photosynthesize(state, computeLight(state, 5), 1.0)
+    expect(after.cells.get(hexKey(0, -10))!.energy).toBeCloseTo(PHOTO_COEFF, 5)
+  })
+})
+
+// ─── stomatal regulation ─────────────────────────────────────────────────────
+
+describe('stomataFactor — drought transpiration throttle', () => {
+  it('is 1 at/above STOMA_FULL water (a well-watered canopy is unthrottled)', () => {
+    expect(stomataFactor(STOMA_FULL)).toBe(1)
+    expect(stomataFactor(9)).toBe(1)
+  })
+
+  it('ramps down to STOMA_MIN as water → 0 (closing stomata under stress)', () => {
+    expect(stomataFactor(0)).toBeCloseTo(STOMA_MIN, 5)
+    expect(stomataFactor(STOMA_FULL / 2)).toBeGreaterThan(STOMA_MIN)
+    expect(stomataFactor(STOMA_FULL / 2)).toBeLessThan(1)
+  })
+
+  it('a stressed leaf transpires LESS than a watered one (survives drought longer)', () => {
+    // Dry leaf (water 0.5) vs a watered one — the dry one loses water more slowly per tick
+    // because its stomata are mostly closed. Verified through the full metabolize→diffuse
+    // tick via simulateSeason would be noisy; the factor itself is the contract.
+    const dry = 0.10 * stomataFactor(0.5)
+    const wet = 0.10 * stomataFactor(5)
+    expect(dry).toBeLessThan(wet)
   })
 })
 

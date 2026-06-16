@@ -36,9 +36,11 @@ export function SeasonSummary({ data, onDismiss }: Props) {
 
         <div className={styles.stats}>
           <Stat label="Energy" value={`${Math.floor(data.energyStart)} → ${Math.floor(data.energyEnd)}`}
-                detail={`${energySign}${Math.abs(Math.round(energyDelta))}`} />
+                detail={`${energySign}${Math.abs(Math.round(energyDelta))}`}
+                tone={energyDelta > 0 ? 'good' : energyDelta < 0 ? 'bad' : 'neutral'} />
           <Stat label="Living cells" value={`${data.cellsStart} → ${data.cellsEnd}`}
-                detail={data.cellsLost > 0 ? `−${data.cellsLost}` : data.cellsGained > 0 ? `+${data.cellsGained}` : '—'} />
+                detail={data.cellsLost > 0 ? `−${data.cellsLost}` : data.cellsGained > 0 ? `+${data.cellsGained}` : '—'}
+                tone={data.cellsLost > 0 ? 'bad' : data.cellsGained > 0 ? 'good' : 'neutral'} />
           <Stat label="Water" value={data.waterStatus} />
         </div>
 
@@ -48,12 +50,13 @@ export function SeasonSummary({ data, onDismiss }: Props) {
   )
 }
 
-function Stat({ label, value, detail }: { label: string; value: string; detail?: string }) {
+type Tone = 'good' | 'bad' | 'neutral'
+function Stat({ label, value, detail, tone = 'neutral' }: { label: string; value: string; detail?: string; tone?: Tone }) {
   return (
     <div className={styles.statRow}>
       <span className={styles.statLabel}>{label}</span>
       <span className={styles.statValue}>{value}</span>
-      {detail && <span className={styles.statDetail}>{detail}</span>}
+      {detail && <span className={`${styles.statDetail} ${styles[tone]}`}>{detail}</span>}
     </div>
   )
 }

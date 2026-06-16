@@ -86,9 +86,11 @@
 .statDetail {
   min-width: 42px;
   text-align: right;
-  color: #7bb36a;
   font-variant-numeric: tabular-nums;
 }
+.good    { color: #7bb36a; }   /* a gain — green */
+.bad     { color: #e08a6a; }   /* a loss — warm red */
+.neutral { color: rgba(255, 255, 255, 0.4); }
 
 .dismiss {
   display: block;

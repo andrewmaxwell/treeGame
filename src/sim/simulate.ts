@@ -196,6 +196,23 @@ function heightLightFactor(q: number, r: number): number {
   return Math.min(1, LIGHT_GROUND_FACTOR + (h / LIGHT_FULL_HEIGHT) * (1 - LIGHT_GROUND_FACTOR))
 }
 
+// Stomatal regulation: a water-stressed leaf/fruit closes its stomata, throttling
+// transpiration so it stops bleeding water it doesn't have. The factor is 1 when the cell
+// holds ≥ STOMA_FULL water and ramps down to STOMA_MIN as water → 0. This lets a canopy
+// stabilise at low-but-alive water under drought (demand falls as supply falls) instead of
+// transpiring itself to 0 and dropping — softening the cliff where a tall canopy had no
+// drought counterplay (deep roots don't help: the deep water is consumed climbing the trunk
+// and the water table depletes). STOMA_FULL = 2 (not 3) so only genuinely dry cells throttle
+// — a normally-watered canopy (water 3–9) is untouched. Deliberately NOT applied to
+// photosynthesis: coupling carbon to leaf water starves recovering trees (whose small canopy
+// runs lowish on water), breaking the recovery snowball — energy income stays light-driven.
+export const STOMA_FULL = 2
+export const STOMA_MIN = 0.15
+export function stomataFactor(water: number): number {
+  if (water >= STOMA_FULL) return 1
+  return STOMA_MIN + (1 - STOMA_MIN) * (water / STOMA_FULL)
+}
+
 // Photosynthesis: leaf cells turn light into energy. Non-leaf cells receive energy
 // only via diffusion — so canopy structure, not bulk, drives the energy economy.
 export function photosynthesize(state: GameState, light: Map<string, number>, intensity: number): GameState {
@@ -233,6 +250,8 @@ function metabolize(state: GameState, mult: number): GameState {
       case 'fruit':  w = 0.20; e = 0.05; break
     }
     if (w === 0 && e === 0) continue
+    // Transpiring cells (leaf/fruit) throttle water loss when stressed — stomatal closure.
+    if (cell.type === 'leaf' || cell.type === 'fruit') w *= stomataFactor(cell.water)
     newCells.set(key, {
       ...cell,
       water:  Math.max(0, cell.water  - w * mult),
