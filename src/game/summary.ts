@@ -83,7 +83,9 @@ export function buildSeasonSummary(
   }
   const flowerStart = count(committed.cells, (c) => c.type === 'flower')
   const fruitSet = Math.max(0, fruitEnd - count(committed.cells, (c) => c.type === 'fruit'))
-  if (weather.season === 'spring' && flowerStart > 0) {
+  // Fruit set only resolves at spring's END (the second half, final.seasonHalf back to 0),
+  // so this line is meaningless after the first half — suppress it there.
+  if (weather.season === 'spring' && flowerStart > 0 && final.seasonHalf === 0) {
     events.push(`🌸 ${fruitSet} of ${flowerStart} ${flowerStart === 1 ? 'bloom' : 'blooms'} set fruit.`)
   }
 

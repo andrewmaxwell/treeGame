@@ -786,18 +786,28 @@ export interface SeasonPlayback {
   storms: StormBreak[]
 }
 
-export function runSeason(state: GameState, rng: RNG, weather: SeasonWeather): SeasonPlayback {
+// Simulate the tick range [startTick, endTick). `topUp` re-grows the canopy on open wood
+// before the range starts (used for the second half so wood added at the mid-season
+// checkpoint leafs out immediately). `applyEnd` runs the end-of-season resolution
+// (autumn drop / fruit set / aging) after the last tick. Storm frames are recorded
+// RELATIVE to the range so they line up with playback's frame index.
+function simulateRange(
+  state: GameState, rng: RNG, weather: SeasonWeather,
+  startTick: number, endTick: number, topUp: boolean, applyEnd: boolean,
+): SeasonPlayback {
   let cur: GameState = { ...state, cells: buildWork(state) }
+  // Mid-season top-up: leaf out any net-positive open hexes opened by new wood (winter
+  // grows no canopy). The true season-onset grow still happens inside runTick at tick 0.
+  if (topUp && weather.season !== 'winter') cur = growAutoLeaves(cur, weather)
   const frames: GameState[] = []
   const storms: StormBreak[] = []
-  const ticks = weather.rain.length
-  for (let tick = 0; tick < ticks; tick++) {
+  for (let tick = startTick; tick < endTick; tick++) {
     const res = runTick(cur, rng, weather, tick)
     cur = res.state
     frames.push(cur)
-    if (res.break) storms.push({ frame: tick, ...res.break })
+    if (res.break) storms.push({ frame: tick - startTick, ...res.break })
   }
-  if (frames.length > 0) {
+  if (applyEnd && frames.length > 0) {
     // Fall: the whole canopy drops automatically (deciduous), every leaf resorbing the full
     // rate into the wood. Other seasons keep their canopy (it regrew at tick 0 and persists).
     let last = weather.season === 'fall' ? resolveAutumnDrop(frames[frames.length - 1]) : frames[frames.length - 1]
@@ -807,6 +817,25 @@ export function runSeason(state: GameState, rng: RNG, weather: SeasonWeather): S
     frames[frames.length - 1] = last
   }
   return { frames, storms }
+}
+
+export function runSeason(state: GameState, rng: RNG, weather: SeasonWeather): SeasonPlayback {
+  return simulateRange(state, rng, weather, 0, weather.rain.length, false, true)
+}
+
+// One HALF of a season (M11 mid-season checkpoint). Part 0 runs ticks [0, mid) and fires
+// the season-onset events (frost / harvest / canopy grow at tick 0); part 1 runs
+// [mid, ticks), re-grows the canopy on newly-placed wood, and resolves the end-of-season
+// events + aging. The two parts back-to-back are equivalent to a full season plus a
+// mid-season leaf top-up. The caller must drive part 1 with an independent RNG stream.
+export function runSeasonPart(
+  state: GameState, rng: RNG, weather: SeasonWeather, part: 0 | 1,
+): SeasonPlayback {
+  const ticks = weather.rain.length
+  const mid = Math.floor(ticks / 2)
+  return part === 0
+    ? simulateRange(state, rng, weather, 0, mid, false, false)
+    : simulateRange(state, rng, weather, mid, ticks, true, true)
 }
 
 // Frames-only convenience wrapper — the shape the simulation tests assert against.

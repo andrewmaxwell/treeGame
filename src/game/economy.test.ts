@@ -14,7 +14,7 @@ import type { Cell } from '../sim/cells'
 function seedState(): GameState {
   const cells = new Map<string, Cell>()
   cells.set(hexKey(0, 0), { q: 0, r: 0, type: 'tree', water: 5, energy: 8, health: 1, rot: 0, age: 0 })
-  return { cells, terrain: new TerrainGen(), season: 'spring', year: 1, score: 0, rngSeed: 1234, worldSeed: 1, goals: { completed: [], peakCells: 1 } }
+  return { cells, terrain: new TerrainGen(), season: 'spring', seasonHalf: 0, year: 1, score: 0, rngSeed: 1234, worldSeed: 1, goals: { completed: [], peakCells: 1 } }
 }
 
 describe('multi-season economy sanity', () => {

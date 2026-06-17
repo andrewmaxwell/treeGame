@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   createPlanningState,
   handleTap,
+  applyPlanCommit,
   applySeasonAdvance,
   bankedEnergy,
   type PlanningState,
@@ -20,6 +21,7 @@ function makeState(cells: Cell[]): GameState {
     cells: map,
     terrain: new TerrainGen(),
     season: 'spring',
+    seasonHalf: 0,
     year: 1,
     score: 0,
     rngSeed: 42,
@@ -113,6 +115,22 @@ describe('applySeasonAdvance — energy economy', () => {
     const after = applySeasonAdvance(game, createPlanningState(5))
     expect(after.season).toBe('spring')
     expect(after.year).toBe(4)
+  })
+})
+
+describe('applyPlanCommit — mid-season checkpoint commit', () => {
+  it('commits staged cells and deducts energy WITHOUT advancing the season', () => {
+    const game = { ...makeState([mkCell(0, 0, 'tree', { energy: 8 })]), season: 'summer' as const, year: 2 }
+    let p = createPlanningState(8)
+    p = stage(0, -1, 'branch', game, p)
+
+    const after = applyPlanCommit(game, p)
+    // Staged growth committed and cost deducted, exactly like a full advance...
+    expect(after.cells.get(hexKey(0, -1))!.type).toBe('tree')
+    expect(bankedEnergy(after.cells)).toBeCloseTo(8, 5)
+    // ...but the season/year are untouched (we stay in-season for the second half).
+    expect(after.season).toBe('summer')
+    expect(after.year).toBe(2)
   })
 })
 

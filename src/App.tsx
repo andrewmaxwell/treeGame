@@ -8,6 +8,7 @@ import { createInitialState, type GameState, type Season } from './game/state'
 import {
   createPlanningState,
   handleTap,
+  applyPlanCommit,
   applySeasonAdvance,
   computeReachable,
   getValidPlacements,
@@ -22,7 +23,7 @@ import { diagnoseReport } from './game/diagnose'
 import { evaluateGoals, currentGoal, completedMilestones, type GoalContext } from './game/goals'
 import {
   computeRemovalSet, pruneCost, seversWholeCanopy, removesEntireTree,
-  computeMultiRemoval, pruneSelectionCost,
+  computeMultiRemoval, pruneSelectionCost, isPruneable,
 } from './game/prune'
 import { loadGame, saveGame, clearSave } from './game/save'
 import { Intro } from './ui/Intro'
@@ -35,7 +36,7 @@ import {
   SEASON_MONTHS,
   type SeasonWeather,
 } from './sim/weather'
-import { runSeason, mulberry32, type StormBreak } from './sim/simulate'
+import { runSeasonPart, mulberry32, type StormBreak } from './sim/simulate'
 import { computeStructure } from './sim/structure'
 import { hexKey } from './sim/grid'
 import type { Cell } from './sim/cells'
@@ -114,6 +115,10 @@ const TICKS_PER_SECOND = 12
 const MS_PER_TICK = 1000 / TICKS_PER_SECOND
 // Playback holds this long when a storm snaps cells, so the break registers.
 const STORM_PAUSE_MS = 900
+// A season is simulated in two halves with a planning checkpoint between (M11). The two
+// halves draw from independent RNG streams so a mid-season save replays identically; the
+// second half's stream is the season seed mixed with this salt.
+const HALF2_RNG_SALT = 0x9e3779b9
 
 export function App() {
   // Resume a saved run if one exists, else start fresh. The useState lazy initializer
@@ -130,7 +135,7 @@ export function App() {
   const [energyRemaining, setEnergy]   = useState(() => planningRef.current.energyAvailable)
   const [energyTotal, setEnergyTotal]  = useState(() => planningRef.current.energyAvailable)
   const [canAdvance, setCanAdvance]    = useState(true)
-  const [seasonYear, setSeasonYear]    = useState({ season: gameRef.current.season, year: gameRef.current.year })
+  const [seasonYear, setSeasonYear]    = useState({ season: gameRef.current.season, year: gameRef.current.year, half: gameRef.current.seasonHalf })
   const [isPlaying, setIsPlaying]      = useState(false)
   const [playbackProgress, setProgress] = useState(0)
   const [forecast, setForecast]        = useState<ForecastDisplay>(() => makeForecast(gameRef.current))
@@ -152,7 +157,7 @@ export function App() {
   // Captured at advance time so finishPlayback can diff committed→final for the
   // season summary and evaluate goals once the final state is known.
   const summaryInputRef = useRef<{
-    committed: GameState; weather: SeasonWeather; shedThisTurn: boolean; storms: StormBreak[]
+    committed: GameState; weather: SeasonWeather; shedThisTurn: boolean; storms: StormBreak[]; part: 0 | 1
   } | null>(null)
 
   // Keep a ref to mode so the tap handler always sees the current value
@@ -184,9 +189,13 @@ export function App() {
     if (pb) cancelAnimationFrame(pb.rafId)
     playbackRef.current = null
 
-    // Advance the RNG seed for the next season by drawing one more value
-    const rng = mulberry32(finalState.rngSeed)
-    const nextSeed = Math.floor(rng() * 0xFFFFFFFF)
+    // A full season completes only at the end of part 1 (finalState back to half 0). Advance
+    // the RNG seed for the next season then; after part 0 (the mid-season checkpoint) the seed
+    // is held so part 1 derives its own independent stream from the same persisted seed.
+    const seasonComplete = finalState.seasonHalf === 0
+    const nextSeed = seasonComplete
+      ? Math.floor(mulberry32(finalState.rngSeed)() * 0xFFFFFFFF)
+      : finalState.rngSeed
 
     // Evaluate milestones against the just-simulated season.
     const si = summaryInputRef.current
@@ -250,7 +259,7 @@ export function App() {
       setMode('branch'); modeRef.current = 'branch'
     }
 
-    setSeasonYear({ season: finalState.season, year: finalState.year })
+    setSeasonYear({ season: finalState.season, year: finalState.year, half: finalState.seasonHalf })
     setForecast(makeForecast(gameRef.current))
     setScore(gameRef.current.score)
     setGoalsView(goalsViewOf(gameRef.current))
@@ -336,11 +345,12 @@ export function App() {
   const onTap = useCallback((q: number, r: number) => {
     if (isPlaying) return
 
-    // Bulk-prune mode: tap toggles a real (non-terrain) cell in the prune selection.
+    // Bulk-prune mode: tap toggles a pruneable cell in the prune selection. Leaves aren't
+    // pruneable (auto-managed) — they drop free as collateral when their wood is cut.
     if (pruneMode) {
       const key = hexKey(q, r)
       const cell = gameRef.current.cells.get(key)
-      if (!cell || cell.type === 'soil' || cell.type === 'rock') return
+      if (!cell || !isPruneable(cell)) return
       setPruneSel((prev) => {
         const next = new Set(prev)
         if (next.has(key)) next.delete(key)
@@ -462,24 +472,35 @@ export function App() {
     setPruneMode(false)
     setPruneSel(new Set())
 
-    // 0. Weather for the season being PLANNED (before the label advances). This is
-    //    the single source of season truth for the simulation, so it stays correct
-    //    even though applySeasonAdvance rolls the label forward to the next season.
+    // 0. Weather for the season being PLANNED (before any label advance). This is the
+    //    single source of season truth for the simulation, so it stays correct even though
+    //    part 1's commit rolls the label forward to the next season.
     const cur = gameRef.current
     const weather = generateWeather(cur.season, cur.year, cur.worldSeed)
-    // The whole canopy auto-drops at fall's end (deciduous) — that's the "shed" event the
-    // milestone tracks, now automatic rather than a per-leaf chore.
-    const shedThisTurn = cur.season === 'fall'
+    const part = cur.seasonHalf
+    // The whole canopy auto-drops at fall's end — that happens in part 1's end-of-season
+    // resolution, which is the "shed" event the milestone tracks (now automatic).
+    const shedThisTurn = cur.season === 'fall' && part === 1
 
-    // 1. Commit staged cells → new game state (label advanced to the next season)
-    const committed = applySeasonAdvance(cur, planningRef.current)
+    // 1. Commit the staged plan. Part 0 commits WITHOUT advancing the season (we stay in
+    //    this season for the second half); part 1's commit advances the label to the next
+    //    season and resets the half. Each half draws an independent RNG stream from the
+    //    same persisted seed so a mid-season save replays identically.
+    let committed: GameState
+    let rng: ReturnType<typeof mulberry32>
+    if (part === 0) {
+      committed = { ...applyPlanCommit(cur, planningRef.current), seasonHalf: 1 }
+      rng = mulberry32(committed.rngSeed)
+    } else {
+      committed = applySeasonAdvance(cur, planningRef.current)
+      rng = mulberry32((committed.rngSeed ^ HALF2_RNG_SALT) >>> 0)
+    }
 
-    // 2. Run simulation under the planned season's weather. The canopy auto-grows at the
-    //    season's first tick and auto-drops at fall's end. Storm breaks come back alongside
-    //    the frames for the playback highlight + summary.
-    const rng = mulberry32(committed.rngSeed)
-    const { frames, storms } = runSeason(committed, rng, weather)
-    summaryInputRef.current = { committed, weather, shedThisTurn, storms }
+    // 2. Simulate this half under the planned season's weather. Part 0 runs the first 30
+    //    ticks (season-onset events fire here); part 1 runs the last 30 and resolves the
+    //    end-of-season events (autumn drop / fruit set / aging).
+    const { frames, storms } = runSeasonPart(committed, rng, weather, part)
+    summaryInputRef.current = { committed, weather, shedThisTurn, storms, part }
 
     // 3. Animate
     startPlayback(frames, storms)
@@ -511,7 +532,7 @@ export function App() {
     setEnergy(planning.energyAvailable)
     setEnergyTotal(planning.energyAvailable)
     setCanAdvance(true)
-    setSeasonYear({ season: fresh.season, year: fresh.year })
+    setSeasonYear({ season: fresh.season, year: fresh.year, half: fresh.seasonHalf })
     setIsPlaying(false)
     setProgress(0)
     setForecast(makeForecast(fresh))
@@ -593,6 +614,7 @@ export function App() {
         energyRemaining={energyRemaining}
         energyTotal={energyTotal}
         season={seasonYear.season}
+        seasonHalf={seasonYear.half}
         year={seasonYear.year}
         score={score}
         forecast={forecast}
@@ -630,6 +652,7 @@ export function App() {
           affordable={energyRemaining >= inspected.cost}
           seversCanopy={inspected.severs}
           removesAll={inspected.removesAll}
+          pruneable={isPruneable(inspected.cell)}
           stress={inspected.stress}
           onPrune={onPrune}
           onClose={() => setInspected(null)}

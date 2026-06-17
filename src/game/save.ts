@@ -14,6 +14,7 @@ export interface SaveData {
   v: 1
   cells: Cell[]
   season: GameState['season']
+  seasonHalf?: 0 | 1   // optional: pre-checkpoint saves resume at the season start (0)
   year: number
   score: number
   rngSeed: number
@@ -26,6 +27,7 @@ export function serialize(game: GameState): SaveData {
     v: 1,
     cells: [...game.cells.values()],
     season: game.season,
+    seasonHalf: game.seasonHalf,
     year: game.year,
     score: game.score,
     rngSeed: game.rngSeed,
@@ -41,6 +43,7 @@ export function deserialize(data: SaveData): GameState {
     cells,
     terrain: new TerrainGen(),
     season: data.season,
+    seasonHalf: data.seasonHalf === 1 ? 1 : 0,
     year: data.year,
     score: data.score,
     rngSeed: data.rngSeed,

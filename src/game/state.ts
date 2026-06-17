@@ -20,6 +20,12 @@ export interface GameState {
   cells: Map<string, Cell>
   terrain: TerrainGen
   season: Season
+  // Which half of the current season the player is planning before. A season is
+  // simulated in two 30-tick parts with a planning checkpoint between them, so the
+  // player can make smaller batches of changes. 0 = before the first half (season
+  // onset events fire here); 1 = the mid-season checkpoint, before the second half
+  // (end-of-season events — autumn drop, fruit set, aging — fire after it).
+  seasonHalf: 0 | 1
   year: number
   score: number
   rngSeed: number   // seed used to produce the NEXT season's RNG
@@ -44,7 +50,7 @@ export function createInitialState(): GameState {
   cells.set(hexKey(0, seedR), seed)
 
   return {
-    cells, terrain, season: 'spring', year: 1, score: 0,
+    cells, terrain, season: 'spring', seasonHalf: 0, year: 1, score: 0,
     rngSeed: Math.floor(Math.random() * 0xFFFFFFFF),
     worldSeed: Math.floor(Math.random() * 0xFFFFFFFF),
     goals: { completed: [], peakCells: 1 },

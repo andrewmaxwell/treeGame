@@ -18,6 +18,7 @@ function makeState(cells: Cell[], over: Partial<GameState> = {}): GameState {
     cells: map,
     terrain: new TerrainGen(),
     season: 'spring',
+    seasonHalf: 0,
     year: 1,
     score: 0,
     rngSeed: 42,

@@ -16,6 +16,7 @@ interface HUDProps {
   energyRemaining: number
   energyTotal: number
   season: Season
+  seasonHalf: 0 | 1            // which half of the season is being planned (mid-season checkpoint)
   year: number
   score: number
   forecast: ForecastDisplay
@@ -54,7 +55,7 @@ const SEASON_LABEL: Record<Season, string> = {
 }
 
 export function HUD({
-  energyRemaining, energyTotal, season, year, score, forecast,
+  energyRemaining, energyTotal, season, seasonHalf, year, score, forecast,
   currentGoal, completedGoals, showNudge, springReLeaf, flowerNoSpots, mode, flowerUnlocked, canAdvance,
   isPlaying, playbackProgress, playbackStats, overlay, pruneMode, pruneCount, pruneCost, pruneRemovesAll,
   onOverlayChange, onTogglePrune, onConfirmPrune,
@@ -72,7 +73,7 @@ export function HUD({
       <div className={styles.topBar}>
         <div className={styles.seasonBlock}>
           <span className={styles.season}>{SEASON_LABEL[season]}, Year {year}</span>
-          <span className={styles.months}>{forecast.monthRange}</span>
+          <span className={styles.months}>{forecast.monthRange} · {seasonHalf === 0 ? 'first half' : 'second half'}</span>
         </div>
         <div className={styles.weatherBlock}>
           <span className={styles.weatherNow} title="This season">
@@ -241,7 +242,7 @@ export function HUD({
                 disabled={!canAdvance}
                 title={canAdvance ? undefined : 'Fix disconnected growth first'}
               >
-                Advance Season →
+                {seasonHalf === 0 ? 'Advance to mid-season →' : 'Advance to next season →'}
               </button>
             </>
           )}

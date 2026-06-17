@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   computeRemovalSet, pruneCost, seversWholeCanopy, PRUNE_COST,
-  computeMultiRemoval, pruneSelectionCost, removesEntireTree,
+  computeMultiRemoval, pruneSelectionCost, removesEntireTree, isPruneable,
 } from './prune'
 import { hexKey } from '../sim/grid'
 import { surfaceR } from '../sim/terrain'
@@ -120,6 +120,24 @@ describe('pruneCost', () => {
     expect(pruneCost(c(0, -1, 'tree', { health: 0.2 }))).toBe(0)
     expect(pruneCost(c(0, -1, 'deadwood'))).toBe(0)
     expect(pruneCost(c(0, -1, 'tree', { rot: 0.5 }))).toBe(0)
+  })
+  it('flowers and fruit are free to drop (soft tissue, not a wound to seal)', () => {
+    expect(pruneCost(c(0, -1, 'flower', { health: 1 }))).toBe(0)
+    expect(pruneCost(c(0, -1, 'fruit', { health: 1 }))).toBe(0)
+  })
+})
+
+describe('isPruneable', () => {
+  it('wood, deadwood, flowers and fruit are pruneable', () => {
+    expect(isPruneable(c(0, -1, 'tree'))).toBe(true)
+    expect(isPruneable(c(0, -1, 'deadwood'))).toBe(true)
+    expect(isPruneable(c(0, -1, 'flower'))).toBe(true)
+    expect(isPruneable(c(0, -1, 'fruit'))).toBe(true)
+  })
+  it('leaves (auto-managed) and terrain are not pruneable', () => {
+    expect(isPruneable(c(0, -1, 'leaf'))).toBe(false)
+    expect(isPruneable(c(0, 1, 'soil'))).toBe(false)
+    expect(isPruneable(c(0, 1, 'rock'))).toBe(false)
   })
 })
 

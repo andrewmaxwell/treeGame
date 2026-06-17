@@ -37,8 +37,11 @@ function has(cells: Map<string, Cell>, type: Cell['type']): boolean {
 export const MILESTONES: Milestone[] = [
   {
     id: 'first-leaf',
-    goal: 'Grow your first leaf',
-    log: 'Your first leaf unfurled.',
+    goal: 'Grow a branch tall enough to leaf out',
+    log: 'Your first leaves unfurled.',
+    // Leaves are auto-grown (M10): the canopy fills in on open wood ≥ MIN_LEAF_HEIGHT
+    // above the spawn ground. So the player's action is growing the branch up, not
+    // placing a leaf — this credits the first time that produces a canopy.
     check: (c) => has(c.cells, 'leaf'),
   },
   {
@@ -55,10 +58,11 @@ export const MILESTONES: Milestone[] = [
   },
   {
     id: 'shed-leaves',
-    goal: 'Let your canopy fall before winter',
-    log: 'Your canopy fell, its energy drawn back into the wood for winter.',
-    // The whole canopy now drops automatically each fall (resorbing its energy) — this
-    // completes the first time the player simulates a fall season.
+    goal: 'Reach your first autumn',
+    log: 'Autumn came; your canopy fell, its energy drawn back into the wood for winter.',
+    // The whole canopy auto-drops each fall (resorbing 75% of its energy) — no longer a
+    // player action (M10 auto-leaves), so this reads as reaching the season, not a command.
+    // Completes the first time the player simulates a fall.
     check: (c) => c.seasonSimulated === 'fall',
   },
   {
@@ -133,6 +137,30 @@ export const MILESTONES: Milestone[] = [
     goal: 'Produce 25 lifetime seeds',
     log: 'Twenty-five seeds — a legacy of forests.',
     check: (c) => c.score >= 25,
+  },
+  {
+    id: 'ten-seeds',
+    goal: 'Produce 10 seeds in one year',
+    log: 'Ten seeds in a single year — a heavy, golden harvest.',
+    check: (c) => c.seedsThisSeason >= 10,
+  },
+  {
+    id: 'live-decade',
+    goal: 'Keep your tree alive into its 10th year',
+    log: 'A decade of seasons — your tree has grown old and strong.',
+    check: (c) => c.yearSimulated >= 10,
+  },
+  {
+    id: 'two-hundred-cells',
+    goal: 'Grow to 200 cells',
+    log: 'Two hundred cells — a giant of the canopy.',
+    check: (c) => c.peakCells >= 200,
+  },
+  {
+    id: 'lifetime-100',
+    goal: 'Produce 100 lifetime seeds',
+    log: 'A hundred seeds across a lifetime — a true forest-maker.',
+    check: (c) => c.score >= 100,
   },
 ]
 

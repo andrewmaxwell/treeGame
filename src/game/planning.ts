@@ -331,7 +331,11 @@ function touchesRealTree(q: number, r: number, game: GameState): boolean {
 
 const SEASONS: Season[] = ['spring', 'summer', 'fall', 'winter']
 
-export function applySeasonAdvance(game: GameState, planning: PlanningState): GameState {
+// Commit the staged plan into the game state: deduct the plan's energy cost from the
+// paying cells and promote staged cells to real ones. Does NOT touch the season label
+// or half — that's the caller's job (a mid-season checkpoint commits without advancing
+// the season; a season-end advance also rolls the label forward). Pure.
+export function applyPlanCommit(game: GameState, planning: PlanningState): GameState {
   const newCells = new Map(game.cells)
 
   // Net energy cost of the plan: placements (flowers cost more) + prune wound-sealing.
@@ -365,10 +369,16 @@ export function applySeasonAdvance(game: GameState, planning: PlanningState): Ga
     newCells.set(key, real)
   }
 
+  return { ...game, cells: newCells }
+}
+
+export function applySeasonAdvance(game: GameState, planning: PlanningState): GameState {
+  const committed = applyPlanCommit(game, planning)
+
   // Advance season
   const nextIdx = (SEASONS.indexOf(game.season) + 1) % 4
   const nextSeason = SEASONS[nextIdx]
   const nextYear = nextSeason === 'spring' ? game.year + 1 : game.year
 
-  return { ...game, cells: newCells, season: nextSeason, year: nextYear }
+  return { ...committed, season: nextSeason, seasonHalf: 0, year: nextYear }
 }

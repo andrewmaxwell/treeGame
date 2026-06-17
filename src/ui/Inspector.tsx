@@ -11,6 +11,7 @@ interface Props {
   affordable: boolean
   seversCanopy: boolean  // pruning would cut the whole canopy from the roots
   removesAll: boolean    // pruning would wipe out the whole tree → blocked
+  pruneable: boolean     // false for leaves (auto-managed) and terrain — no prune button
   stress?: number        // structural stress (load/strength) for wood cells; else undefined
   onPrune: () => void
   onClose: () => void
@@ -50,7 +51,7 @@ function status(cell: Cell): { text: string; tone: 'good' | 'warn' | 'bad' } {
   return { text: 'Recovering', tone: 'warn' }
 }
 
-export function Inspector({ cell, removalCount, cost, affordable, seversCanopy, removesAll, stress, onPrune, onClose }: Props) {
+export function Inspector({ cell, removalCount, cost, affordable, seversCanopy, removesAll, pruneable, stress, onPrune, onClose }: Props) {
   // Two-step confirm only when severing the whole canopy.
   const [confirming, setConfirming] = useState(false)
   useEffect(() => { setConfirming(false) }, [cell])
@@ -100,7 +101,11 @@ export function Inspector({ cell, removalCount, cost, affordable, seversCanopy, 
         {!isTerrain && <Row label="Age" value={`${cell.age} ${cell.age === 1 ? 'season' : 'seasons'}`} />}
       </div>
 
-      {!isTerrain && (
+      {!isTerrain && cell.type === 'leaf' && (
+        <p className={styles.hint}>Leaves grow and fall on their own — no need to prune them.</p>
+      )}
+
+      {pruneable && (
         <>
           {removesAll && (
             <div className={styles.warnLine}>This is your whole tree — prune something smaller, or "Plant a new seed" to start over.</div>

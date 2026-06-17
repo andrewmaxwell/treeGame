@@ -53,10 +53,21 @@ export function removesEntireTree(cells: Map<string, Cell>, removed: Set<string>
   return living > 0 && livingRemoved === living
 }
 
-// Pruning a healthy cell costs energy (wound sealing); pruning dead/dying/rotted
-// wood is free counterplay.
+// What the player may prune. Leaves are auto-grown and auto-dropped (M10), so the player
+// never prunes them — removing a leaf is a pointless trap (it regrows free next spring and
+// the canopy sheds itself every fall). Wood, deadwood, flowers, and fruit are pruneable;
+// soil/rock and leaves are not. (Leaves still drop as free collateral when the wood they
+// hang on is pruned — that's handled by applyBreakage, not by pruning the leaf directly.)
+export function isPruneable(cell: Cell): boolean {
+  return cell.type === 'tree' || cell.type === 'deadwood' || cell.type === 'flower' || cell.type === 'fruit'
+}
+
+// Pruning a healthy wood cell costs energy (wound sealing); pruning dead/dying/rotted wood
+// is free counterplay, and so is dropping a flower or fruit — soft tissue isn't a wound to
+// seal, and dropping a doomed thirsty fruit to free up a limb's water is legitimate play.
 export const PRUNE_COST = 2
 export function pruneCost(cell: Cell): number {
+  if (cell.type === 'flower' || cell.type === 'fruit') return 0
   if (cell.type === 'deadwood') return 0
   if (cell.rot > 0) return 0
   if (cell.health < 0.3) return 0

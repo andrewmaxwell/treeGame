@@ -11,7 +11,7 @@ function sample(): GameState {
   cells.set(hexKey(0, -1), { q: 0, r: -1, type: 'leaf', water: 3, energy: 4, health: 0.9, rot: 0, age: 1 })
   cells.set(hexKey(0, 1), { q: 0, r: 1, type: 'soil', water: 12, energy: 0, health: 1, rot: 0, age: 0 })
   return {
-    cells, terrain: new TerrainGen(), season: 'fall', year: 3, score: 4,
+    cells, terrain: new TerrainGen(), season: 'fall', seasonHalf: 1, year: 3, score: 4,
     rngSeed: 111, worldSeed: 222, goals: { completed: ['first-leaf', 'survive-season'], peakCells: 14 },
   }
 }

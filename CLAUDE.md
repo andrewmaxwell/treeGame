@@ -169,6 +169,24 @@ or flower rather than hoard.
 One season = **60 simulation ticks**, played back at ~12 ticks/sec (≈5 seconds of
 animation, skippable).
 
+**Half-season checkpoints (M11).** A season is simulated in **two 30-tick halves** with a
+planning checkpoint between them (`GameState.seasonHalf`: 0 = before the first half, 1 = the
+mid-season checkpoint). This lets the player make **smaller batches of changes with less
+drastic change between them** — 8 planning phases/year instead of 4 — without disturbing the
+four-season rhythm: weather, frost, fruit-set, and harvest all stay anchored to season
+boundaries. The season-onset events (tick 0, below) fire in part 0; the end-of-season
+resolution (autumn drop / fruit set / aging) fires after part 1. Part 1 also re-runs
+`growAutoLeaves` as a top-up so wood placed at the checkpoint leafs out immediately. `seasonHalf`
+is serialized, so a mid-season save resumes correctly; each half draws an **independent RNG
+stream** from the same persisted `rngSeed` (part 1 mixes in a salt) so a mid-season reload
+replays identically, and the season→season seed chain is unchanged from the pre-M11 single
+advance. `runSeasonPart(state, rng, weather, part)` runs one half; `runSeason` (full 60 ticks)
+is kept for the sim tests and the headless harness. `applyPlanCommit` commits a plan without
+advancing the season label (used by part 0 and by `applySeasonAdvance`, which then rolls the
+label forward and resets the half). **Balance note:** photosynthesis refills energy between the
+halves, so a tree gets more growth opportunities per year (mild easing); biology per tick is
+unchanged. The headless harness still drives full seasons, so re-validate balance in-game.
+
 At **tick 0** of a season, season-boundary events fire first (in this order): winter frost
 (`winterFrost`), fall fruit harvest (`ripenFruit`), then — for spring/summer/fall — the
 canopy auto-grows (`growAutoLeaves`; see "Auto-leaves"). Then each tick, in order:
@@ -621,9 +639,16 @@ See "Flowers, Fruit, and the Annual Reproductive Cycle" for the full lifecycle.
 - Available during the planning phase only
 - Tap any existing (non-staged) cell to open the **inspector** (bottom sheet on
   mobile, floating panel on desktop): type, water, energy, health, rot, age, stress
-- "Prune" button in the inspector:
-  - Healthy cell (health ≥ 0.3): costs **2 energy** (wound sealing)
-  - Dying cell (health < 0.3), deadwood, or rotted: **free**
+- **What's pruneable (`isPruneable` in `game/prune.ts`):** wood, deadwood, flowers, fruit.
+  **Leaves are NOT pruneable** (M11) — they're auto-grown and auto-dropped (M10), so removing
+  one is a pointless trap (it regrows free next spring). The inspector shows a leaf's stats
+  but no prune button (with a one-line note); bulk-prune mode won't select leaves. Leaves
+  still drop as **free collateral** when the wood they hang on is pruned (via `applyBreakage`).
+- "Prune" button cost (`pruneCost`):
+  - Healthy wood (health ≥ 0.3): costs **2 energy** (wound sealing)
+  - Dying wood (health < 0.3), deadwood, or rotted: **free**
+  - **Flowers and fruit: free** (M11) — soft tissue isn't a wound to seal, and dropping a
+    doomed thirsty fruit to free up a limb's water is legitimate counterplay, not a penalty
 - Pruning removes the cell and every cell that loses its connection to the root
   system as a result — the inspector shows a count and highlights the doomed region
   before you confirm ("Prune — 9 cells will be removed")
@@ -690,10 +715,12 @@ Lifetime viable seeds produced. Continuous, always visible, the thing players tr
 to beat next run.
 
 ### Milestones (revealed one at a time)
-1. Grow your first leaf
+1. Grow a branch tall enough to leaf out (reworded M11 — leaves auto-grow, so the player's
+   action is growing the wood up; "Grow your first leaf" was misleading)
 2. Survive your first season
 3. Grow 10 cells
-4. Let your canopy fall before winter (automatic each fall)
+4. Reach your first autumn (reworded M11 — the canopy drops automatically, so this is framed
+   as reaching the season, not the old "Let your canopy fall before winter" command)
 5. Survive your first winter
 6. Reach 30 cells (unlocks Flower mode)
 7. Grow your first flower
@@ -705,6 +732,10 @@ to beat next run.
 13. Reach 100 cells
 14. Carry a fruit through a drought summer
 15. Produce 25 lifetime seeds
+16. Produce 10 seeds in one year
+17. Keep your tree alive into its 10th year (longevity — the explicit late-game question)
+18. Grow to 200 cells
+19. Produce 100 lifetime seeds
 ... keep generating; milestones never run out
 (The former "recover from rot" milestone is shelved with rot — see Decisions Deferred.)
 
@@ -1025,6 +1056,17 @@ A pass of playtest-driven UX/balance work (brother's second playthrough):
   "viable but worse" middle, because energy-scarcity (the coupling) doesn't touch a
   well-watered low canopy. A genuine soft height incentive needs the deferred multi-tree
   **shade competition**; until then the wall stays.
+
+### Milestone 11 — Half-season checkpoints & milestone refresh ✅ built
+- **Half-season checkpoints** — a season now simulates in two 30-tick halves with a planning
+  checkpoint between (see "Tick structure" → "Half-season checkpoints" for the full design,
+  `seasonHalf`, the RNG-per-half scheme, `runSeasonPart`/`applyPlanCommit`, and the balance
+  note). Answers the brother's "more turns per season" ask (BACKLOG "Needs info" reading c):
+  smaller batches, less drastic change between them, four-season rhythm intact.
+- **Milestone refresh** — reworded `first-leaf` ("Grow a branch tall enough to leaf out") and
+  `shed-leaves` ("Reach your first autumn") since both were *automatic* after M10 auto-leaves
+  and read as instructions the player couldn't act on. Added four longevity/scale goals
+  (`ten-seeds`, `live-decade`, `two-hundred-cells`, `lifetime-100`).
 
 ### Deferred — Rot
 (Was Milestone 9; moved to Decisions Deferred.) Infection sites, spread, free pruning of

@@ -23,7 +23,7 @@ function trunkState(season: Season = 'spring', tipHealth = 1): GameState {
   const map = new Map<string, Cell>()
   for (const c of cells) map.set(hexKey(c.q, c.r), c)
   return {
-    cells: map, terrain: new TerrainGen(), season, year: 1, score: 0,
+    cells: map, terrain: new TerrainGen(), season, seasonHalf: 0, year: 1, score: 0,
     rngSeed: 42, worldSeed: 99, goals: { completed: [], peakCells: 30 },
   }
 }

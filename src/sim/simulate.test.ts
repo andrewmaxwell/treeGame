@@ -7,6 +7,7 @@ import {
   updateHealth,
   simulateSeason,
   runSeason,
+  runSeasonPart,
   PHOTO_COEFF,
   LIGHT_GROUND_FACTOR,
   LIGHT_FULL_HEIGHT,
@@ -36,6 +37,7 @@ function makeState(cells: Cell[]): GameState {
     cells: map,
     terrain: new TerrainGen(),
     season: 'spring',
+    seasonHalf: 0,
     year: 1,
     score: 0,
     rngSeed: 42,
@@ -501,6 +503,43 @@ describe('simulateSeason — fall canopy drop', () => {
     const last = frames[frames.length - 1]
     const woodEnergy = [...last.cells.values()].filter((c) => c.type === 'tree').reduce((a, c) => a + c.energy, 0)
     expect(woodEnergy).toBeGreaterThan(0)
+  })
+})
+
+describe('runSeasonPart — mid-season checkpoint', () => {
+  // Root + trunk + a leaf (same shape as the fall-drop test).
+  function tree(): Cell[] {
+    return [
+      { q: 0, r: 0,  type: 'tree', water: 6, energy: 5, health: 1, rot: 0, age: 2 },
+      { q: 0, r: -1, type: 'tree', water: 6, energy: 5, health: 1, rot: 0, age: 2 },
+      { q: 0, r: -2, type: 'leaf', water: 6, energy: 5, health: 1, rot: 0, age: 1 },
+    ]
+  }
+
+  it('part 0 runs the first half and defers all end-of-season resolution', () => {
+    const weather = generateWeather('fall', 2, 99)
+    const start = makeState(tree())
+    const startAge = start.cells.get(hexKey(0, 0))!.age
+    const p0 = runSeasonPart(start, mulberry32(3), weather, 0)
+
+    expect(p0.frames.length).toBe(TICKS_PER_SEASON / 2)
+    const mid = p0.frames[p0.frames.length - 1]
+    // Canopy is still up (no autumn drop yet) and nothing has aged — those happen in part 1.
+    expect([...mid.cells.values()].some((c) => c.type === 'leaf')).toBe(true)
+    expect(mid.cells.get(hexKey(0, 0))!.age).toBe(startAge)
+  })
+
+  it('part 1 drops the fall canopy at the end and ages exactly once across the season', () => {
+    const weather = generateWeather('fall', 2, 99)
+    const start = makeState(tree())
+    const startAge = start.cells.get(hexKey(0, 0))!.age
+    const p0frames = runSeasonPart(start, mulberry32(3), weather, 0).frames
+    const mid = p0frames[p0frames.length - 1]
+    const p1frames = runSeasonPart(mid, mulberry32(123), weather, 1).frames
+    const end = p1frames[p1frames.length - 1]
+
+    expect([...end.cells.values()].some((c) => c.type === 'leaf')).toBe(false)  // bare → winter
+    expect(end.cells.get(hexKey(0, 0))!.age).toBe(startAge + 1)  // aged once, not twice
   })
 })
 
