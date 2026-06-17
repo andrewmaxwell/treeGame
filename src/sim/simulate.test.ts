@@ -13,6 +13,12 @@ import {
   stomataFactor,
   STOMA_FULL,
   STOMA_MIN,
+  photoWaterFactor,
+  PHOTO_WATER_FULL,
+  PHOTO_WATER_MIN,
+  growAutoLeaves,
+  autoLeafPreview,
+  MIN_LEAF_HEIGHT,
 } from './simulate'
 import { mulberry32 } from './rng'
 import { generateWeather, TICKS_PER_SEASON, type SeasonWeather, type StormSeverity } from './weather'
@@ -250,12 +256,26 @@ describe('photosynthesize', () => {
     expect(gained).toBeCloseTo(PHOTO_COEFF * expectedFactor, 5)          // exactly the ground dimming
   })
 
-  it('photosynthesis is NOT throttled by leaf water (carbon stays light-driven)', () => {
-    // Coupling carbon to water would starve recovering trees — energy income must not
-    // depend on how wet the leaf is. A bone-dry lifted leaf still photosynthesizes fully.
-    const state = makeState([mkCell(0, -10, 'leaf', { energy: 0, water: 0 })])
-    const after = photosynthesize(state, computeLight(state, 5), 1.0)
-    expect(after.cells.get(hexKey(0, -10))!.energy).toBeCloseTo(PHOTO_COEFF, 5)
+  it('photosynthesis IS throttled by leaf water (carbon–water coupling)', () => {
+    // A canopy you can't water can't print energy — the cap that stops an over-built tree's
+    // income from running away. A well-watered leaf fixes full carbon; a bone-dry one only
+    // the PHOTO_WATER_MIN floor. (Safe to couple now the canopy auto-grows free each spring,
+    // so a small recovering tree — whose canopy sits near its roots — stays well-watered.)
+    const wet = makeState([mkCell(0, -10, 'leaf', { energy: 0, water: PHOTO_WATER_FULL })])
+    const dry = makeState([mkCell(0, -10, 'leaf', { energy: 0, water: 0 })])
+    const wetGain = photosynthesize(wet, computeLight(wet, 5), 1.0).cells.get(hexKey(0, -10))!.energy
+    const dryGain = photosynthesize(dry, computeLight(dry, 5), 1.0).cells.get(hexKey(0, -10))!.energy
+    expect(wetGain).toBeCloseTo(PHOTO_COEFF, 5)
+    expect(dryGain).toBeCloseTo(PHOTO_COEFF * PHOTO_WATER_MIN, 5)
+    expect(dryGain).toBeLessThan(wetGain)
+  })
+
+  it('photoWaterFactor: 1.0 when watered, ramps to the floor when dry', () => {
+    expect(photoWaterFactor(PHOTO_WATER_FULL)).toBe(1)
+    expect(photoWaterFactor(10)).toBe(1)
+    expect(photoWaterFactor(0)).toBeCloseTo(PHOTO_WATER_MIN, 5)
+    expect(photoWaterFactor(PHOTO_WATER_FULL / 2)).toBeGreaterThan(PHOTO_WATER_MIN)
+    expect(photoWaterFactor(PHOTO_WATER_FULL / 2)).toBeLessThan(1)
   })
 })
 
@@ -285,33 +305,30 @@ describe('stomataFactor — drought transpiration throttle', () => {
 
 // ─── health update & deadwood conversion ─────────────────────────────────────
 
-describe('updateHealth — decline (lerp)', () => {
-  // The lerp (health += (target-health)*0.01) is intentionally slow and asymptotic
-  // — CLAUDE.md's "slow drama". A fully-deprived cell declines monotonically and
-  // converts to deadwood once it crosses ≤0.001 (≈690 ticks). NOTE: this cannot
-  // hit ≤0.001 within 120 ticks (that would require linear decay); the lerp was the
-  // chosen behavior, so this test asserts monotonic decline + eventual conversion.
-  it('a resourceless cell declines monotonically toward 0', () => {
+describe('updateHealth — dry wood goes dormant, never dies', () => {
+  // Thirst floors WOOD at WOOD_DRY_HEALTH (0.5): a dry structural cell idles at half-
+  // health and re-hydrates when the canopy returns — it never decays into deadwood.
+  // (The old `water ≤ 0.5 → 0.0` rule converted a big tree's entire bare upper structure
+  // to deadwood every deciduous winter — a size-punishing death with no counterplay.)
+  // Leaves are unchanged: a metabolically active terminal still dies and drops.
+  it('a waterless wood cell declines toward the 0.5 floor, never below', () => {
     let s = makeState([mkCell(0, -5, 'tree', { water: 0, energy: 0, health: 1 })])
     const key = hexKey(0, -5)
     let prev = 1
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < 200; i++) {
       s = updateHealth(s)
       const h = s.cells.get(key)!.health
-      expect(h).toBeLessThan(prev)  // strictly decreasing
+      expect(h).toBeLessThan(prev)      // strictly decreasing toward the floor
+      expect(h).toBeGreaterThan(0.49)   // but never past the dormant floor
       prev = h
     }
-    expect(prev).toBeLessThan(0.35)   // ~0.30 after 120 ticks
-    expect(prev).toBeGreaterThan(0)   // still alive — not a popped balloon
   })
 
-  it('eventually converts a dead tree cell to deadwood', () => {
+  it('never converts dry wood to deadwood (thirst cannot kill structure)', () => {
     let s = makeState([mkCell(0, -5, 'tree', { water: 0, energy: 0, health: 1 })])
     const key = hexKey(0, -5)
     for (let i = 0; i < 700; i++) s = updateHealth(s)
-    const c = s.cells.get(key)!
-    expect(c.type).toBe('deadwood')
-    expect(c.energy).toBe(0)
+    expect(s.cells.get(key)!.type).toBe('tree')   // still structural wood, alive
   })
 
   it('a leaf at health 0 drops (removed) rather than becoming deadwood', () => {
@@ -414,12 +431,56 @@ describe('simulateSeason — winter onset', () => {
   })
 })
 
-// ─── fall shedding (resolves at season end) ──────────────────────────────────
+// ─── auto-grown canopy ────────────────────────────────────────────────────────
 
-describe('simulateSeason — fall shedding', () => {
-  // Root + trunk + a leaf. Shedding the leaf should leave it in place all season
-  // (so it photosynthesizes), then drop it in the final frame, resorbing energy back
-  // into the tree — never removed early (which would forfeit the season's energy).
+describe('growAutoLeaves', () => {
+  // A vertical trunk from the spawn surface (surfaceR(0)=0) up to height 5.
+  function trunk(): Cell[] {
+    const cells: Cell[] = [{ q: 0, r: 0, type: 'tree', water: 6, energy: 5, health: 1, rot: 0, age: 1 }]
+    for (let r = -1; r >= -5; r--) cells.push({ q: 0, r, type: 'tree', water: 6, energy: 5, health: 1, rot: 0, age: 1 })
+    return cells
+  }
+
+  it('grows leaves on the canopy in a growing season', () => {
+    const after = growAutoLeaves(makeState(trunk()), generateWeather('summer', 2, 99))
+    const leaves = [...after.cells.values()].filter((c) => c.type === 'leaf')
+    expect(leaves.length).toBeGreaterThan(0)
+  })
+
+  it('never grows a leaf below MIN_LEAF_HEIGHT above the spawn ground (crawler suppression)', () => {
+    const after = growAutoLeaves(makeState(trunk()), generateWeather('summer', 2, 99))
+    for (const c of after.cells.values()) {
+      if (c.type !== 'leaf') continue
+      expect(surfaceR(0) - c.r).toBeGreaterThanOrEqual(MIN_LEAF_HEIGHT)  // height = surfaceR(0) − r
+    }
+  })
+
+  it('a flat ground-hugging row (all at height 1) earns NO canopy', () => {
+    // The crawler: wood one cell above the surface, spread wide. No hex it touches clears
+    // MIN_LEAF_HEIGHT, so nothing photosynthesises — the exploit is dead.
+    const row: Cell[] = []
+    for (let q = -4; q <= 4; q++) row.push({ q, r: -1, type: 'tree', water: 6, energy: 5, health: 1, rot: 0, age: 1 })
+    const after = growAutoLeaves(makeState(row), generateWeather('summer', 2, 99))
+    expect([...after.cells.values()].some((c) => c.type === 'leaf')).toBe(false)
+  })
+
+  it('autoLeafPreview returns exactly the hexes growth would fill', () => {
+    const state = makeState(trunk())
+    const w = generateWeather('summer', 2, 99)
+    const preview = autoLeafPreview(state, w.sunAngleDeg, w.intensity)
+    const grown = new Set(
+      [...growAutoLeaves(state, w).cells.values()].filter((c) => c.type === 'leaf').map((c) => hexKey(c.q, c.r)),
+    )
+    expect(preview).toEqual(grown)
+  })
+})
+
+// ─── fall canopy drop (deciduous, resolves at season end) ─────────────────────
+
+describe('simulateSeason — fall canopy drop', () => {
+  // Root + trunk + a leaf. The whole canopy drops automatically at fall's end (no manual
+  // shedding), but only AFTER photosynthesizing all season — so the leaf is present
+  // mid-season and gone in the final frame, its energy resorbed into the wood.
   function tree(): Cell[] {
     return [
       { q: 0, r: 0,  type: 'tree', water: 6, energy: 5, health: 1, rot: 0, age: 2 },
@@ -428,30 +489,18 @@ describe('simulateSeason — fall shedding', () => {
     ]
   }
 
-  it('keeps the shed leaf present until the final frame', () => {
-    const state = makeState(tree())
-    const weather = generateWeather('fall', 2, 99)
-    const shed = new Set([hexKey(0, -2)])
-    const frames = simulateSeason(state, mulberry32(3), weather, shed)
-    // Present mid-season (still working), gone only at the end.
-    expect(frames[30].cells.has(hexKey(0, -2))).toBe(true)
-    expect(frames[frames.length - 1].cells.has(hexKey(0, -2))).toBe(false)
+  it('keeps the canopy through fall, then drops it all at the final frame', () => {
+    const frames = simulateSeason(makeState(tree()), mulberry32(3), generateWeather('fall', 2, 99))
+    expect(frames[30].cells.has(hexKey(0, -2))).toBe(true)  // still working mid-fall
+    const last = frames[frames.length - 1]
+    expect([...last.cells.values()].some((c) => c.type === 'leaf')).toBe(false)  // bare → winter
   })
 
-  it('auto-sheds the whole canopy in fall, resorbing the full rate regardless of marking', () => {
-    const fallW = generateWeather('fall', 2, 99)
-    const last = (frames: GameState[]) => frames[frames.length - 1]
-    const bank = (s: GameState) =>
-      [...s.cells.values()].reduce((a, c) => a + (c.type === 'tree' ? c.energy : 0), 0)
-
-    // The whole canopy drops at fall's end automatically, every leaf resorbing the full
-    // 75% — so marking a leaf to shed (the old busywork) no longer changes the outcome.
-    const marked = last(simulateSeason(makeState(tree()), mulberry32(3), fallW, new Set([hexKey(0, -2)])))
-    const unmarked = last(simulateSeason(makeState(tree()), mulberry32(3), fallW))
-
-    expect(marked.cells.has(hexKey(0, -2))).toBe(false)    // canopy is bare entering winter
-    expect(unmarked.cells.has(hexKey(0, -2))).toBe(false)  // …marked or not
-    expect(bank(marked)).toBeCloseTo(bank(unmarked), 5)    // identical resorption
+  it('resorbs dropped-leaf energy into the wood (not lost)', () => {
+    const frames = simulateSeason(makeState(tree()), mulberry32(3), generateWeather('fall', 2, 99))
+    const last = frames[frames.length - 1]
+    const woodEnergy = [...last.cells.values()].filter((c) => c.type === 'tree').reduce((a, c) => a + c.energy, 0)
+    expect(woodEnergy).toBeGreaterThan(0)
   })
 })
 

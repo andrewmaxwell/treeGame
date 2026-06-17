@@ -167,7 +167,11 @@ or flower rather than hoard.
 
 ### Tick structure
 One season = **60 simulation ticks**, played back at ~12 ticks/sec (≈5 seconds of
-animation, skippable). Each tick, in order:
+animation, skippable).
+
+At **tick 0** of a season, season-boundary events fire first (in this order): winter frost
+(`winterFrost`), fall fruit harvest (`ripenFruit`), then — for spring/summer/fall — the
+canopy auto-grows (`growAutoLeaves`; see "Auto-leaves"). Then each tick, in order:
 
 1. **Light pass** — compute light exposure for every above-ground cell
 2. **Photosynthesis** — leaf cells generate energy from light
@@ -251,12 +255,27 @@ transpiring itself to 0 and dropping. This gives a tall canopy a fighting chance
 spell (before it, deep roots were *not* an effective canopy-drought defence — the deep water
 is consumed climbing the trunk and the water table itself depletes, so sustained drought
 gutted the canopy with no counterplay). Truly extreme sustained drought (soil genuinely
-empty) can still kill — counterplay is deep roots + not over-building height. Deliberately
-**only throttles transpiration, not photosynthesis** — coupling carbon to leaf water starved
-recovering trees (small canopy runs lowish on water) and broke the recovery snowball; energy
-income stays purely light-driven. `STOMA_FULL = 2` so only genuinely dry cells throttle; a
-normal canopy (water 3–9) is untouched, leaving fair-weather balance unchanged. Validated in
-`cli/water.ts` (drought canopy survival) and the `play.ts`/`recover.ts` sweeps.
+empty) can still kill — counterplay is deep roots + not over-building height. `STOMA_FULL = 2`
+so only genuinely dry cells throttle transpiration; a normal canopy (water 3–9) is untouched,
+leaving fair-weather balance unchanged. Validated in `cli/water.ts` (drought canopy survival)
+and the `play.ts`/`recover.ts` sweeps.
+
+**Carbon–water coupling (M10 energy-economy fix):** photosynthesis is **also** scaled by the
+leaf's own water — `gain × photoWaterFactor(cell.water)`, 1.0 at water ≥ `PHOTO_WATER_FULL`
+(2.5), ramping to `PHOTO_WATER_MIN` (0.15) as water → 0. This makes the **water system**
+(trunk width + roots, the conduction cap) the real ceiling on energy income: a canopy you
+can't water can't print energy, so you **can't out-build your hydraulics**. (This reverses the
+M9 Round 3 decision to keep carbon purely light-driven. That decision was made to protect
+*manual* recovering canopies that ran lowish on water; it's safe to couple now that the canopy
+**auto-grows fresh and free each spring** — a small recovering tree's canopy sits near its
+roots and stays well-watered, so coupling throttles only genuinely *over-extended* canopies,
+not recovery.) **Why it was needed:** with free auto-leaves, a purely light-driven canopy let
+a bone-dry over-built tree (273 cells, leaf water ~0.3) still bank ~900 energy with nothing to
+spend it on — energy stopped being scarce. Now over-building dries the canopy and craters its
+own income (harness `cli/bigtree.ts`: an all-in builder's banked energy peaks ~230 and
+collapses as it over-extends, instead of running away), while a disciplined grower stays
+well-watered and unaffected. Validated against the full `play.ts` sweep (balance unchanged:
+balanced ~21 wins, crawler dead) and `recover.ts` (snowball intact).
 
 Heat wave: leaf and fruit water consumption × 1.8.
 Winter: all consumption × 0.35 (dormancy), but photosynthesis is near zero too.
@@ -283,12 +302,26 @@ The lower upkeep made a ground-hugging sprawl cheap again, so it was re-paired w
 ### Health update
 Each tick, a cell's health moves toward a target at rate 0.01/tick. The target is
 **type-aware** (M9 Round 3 fix):
-- **Wood (`'tree'` — trunk AND roots): WATER-driven only.** Target 1.0 if water > 3
-  (`WOOD_WATER_OK`), 0.5 if water > 0.5 (`WOOD_WATER_MIN`), else 0.0. Wood is mostly dead
-  structural scaffolding with living water-conducting sapwood — it does **not** need energy
-  to stay healthy. Energy is purely the growth/reproduction currency (the planning budget),
-  free to pool in the canopy where photosynthesis makes it; a root at energy 0 in wet soil
-  is perfectly healthy. **Why this changed:** previously every wood cell needed `energy > 2`,
+- **Wood (`'tree'` — trunk AND roots): WATER-driven, and thirst NEVER kills it.** Target
+  1.0 if water > 3 (`WOOD_WATER_OK`), else `WOOD_DRY_HEALTH` (**0.5**) — a dry floor, not 0.
+  Wood dies **only** from rot, storms, or pruning; dry structural wood just idles dormant at
+  half-health and re-greens when the canopy waters it again. Wood is mostly dead structural
+  scaffolding with living water-conducting sapwood — it does **not** need energy to stay
+  healthy. Energy is purely the growth/reproduction currency (the planning budget), free to
+  pool in the canopy where photosynthesis makes it; a root at energy 0 in wet soil is
+  perfectly healthy. **Why the dry-floor (post-M9 playtest fix):** the old rule decayed wood
+  at `water ≤ 0.5` toward target 0.0 → deadwood. But a deciduous tree goes **bare every
+  winter**, and with no canopy there is no transpiration to pull water up, so the upper
+  structure of any sizeable tree inevitably dried to ~0 and the rule converted it to deadwood
+  **every single year** — a *size-punishing* death with no counterplay (taller tree = more
+  upper wood shed each winter) and the source of the late-game "pile of dead wood to prune"
+  chore. Real branches don't die over a normal dormant winter. Flooring at 0.5 keeps the real
+  consequences (dry wood is visibly half-grey and can't anchor a flower, which needs > 0.6)
+  while the canopy challenge still bites where it should — **leaves** still need water AND
+  energy and still die. Validated in `cli/winter.ts` (a tall tree accrues 12–24 dry-wood
+  cells per winter, deadwood stays 0) and the `cli/play.ts` strategy sweep (balance
+  unchanged: balanced still beats tall/flower/crawler). **Why wood decoupled from energy in
+  the first place (M9 Round 3):** previously every wood cell needed `energy > 2`,
   so energy made at the leaves (top) had to diffuse all the way DOWN to the roots — it never
   did, and every tree (any tall one especially) sat pinned at health ~0.5 with chronically
   energy-starved roots, a water-starved canopy, and a starved middle. Both unrealistic ("why
@@ -427,18 +460,18 @@ too aggressive, and counter-intuitive. The current model (`sim/structure.ts`):
 - **Frost**: see frost rules below — this is a core mechanic, not a footnote
 
 ### Frost and the deciduous cycle (core mechanic)
-- **The whole canopy drops AUTOMATICALLY at the END of fall** (`resolveAutumnDrop` in
-  `simulate.ts`, run after fall's last tick, before aging) — the deciduous reset. **Every
-  leaf resorbs `LEAF_SHED_RESORB` (75%)** of its stored energy into the adjacent wood. The
-  leaves photosynthesised all fall first; the tree is **bare entering winter**.
-- **No manual shedding (M9 playtest fix).** Originally the player had to tap each leaf to
-  "shed" it for the 75% rate, with un-shed leaves keeping only `LEAF_FROST_RESORB` (30%).
-  Since shedding everything was always strictly best, that was pure busywork — playtesters
-  asked why it wasn't automatic. It is now: fall resorbs 75% for the whole canopy with no
-  input. The tap-to-shed mechanic still exists for *off-season* leaf removal (rare), and
-  `LEAF_FROST_RESORB` remains the backstop rate in `winterFrost` for any terminal somehow
-  present at winter onset. The `shed-leaves` milestone now just completes on your first
-  simulated fall.
+- **The canopy auto-grows in spring/summer/fall and auto-drops at fall's end.** It grows at
+  each growing season's first tick (`growAutoLeaves`, see "Auto-leaves") and drops at the
+  END of fall (`resolveAutumnDrop` in `simulate.ts`, after fall's last tick, before aging)
+  — the deciduous reset. **Every leaf resorbs `LEAF_SHED_RESORB` (75%)** of its stored
+  energy into the adjacent wood. The leaves photosynthesised all fall first; the tree is
+  **bare entering winter**, then re-leafs itself the following spring.
+- **No manual leaf control at all (M10).** Leaves are auto-grown and auto-dropped; the
+  player never places or sheds them. (This subsumed the earlier M9 "auto-shed" fix and
+  removed the leftover tap-to-shed mechanic, the `shedMarked` plumbing, and `resolveShedding`
+  entirely.) `LEAF_FROST_RESORB` remains the backstop rate in `winterFrost` for any terminal
+  somehow present at winter onset. The `shed-leaves` milestone completes on your first
+  simulated fall (`seasonSimulated === 'fall'`).
 - **Why the drop is at fall-end, not winter-onset (important fix):** previously the
   canopy survived into the winter *planning* phase and was frost-killed at winter's
   first sim tick. That meant the winter budget counted leaf energy that was about to be
@@ -514,30 +547,49 @@ kill and winter-growth (age-0) frost death are implemented.
   canopy is bare. Guarded by `recovery.test.ts` ("starved to 0 … recovers via floor").
 
 ### Staging
+- The player stages **wood** (and, in spring, **flowers**). **Leaves are NOT placed by
+  hand** — the canopy auto-grows during the simulation (see "Auto-leaves" below).
 - Tap an empty cell adjacent to any tree cell (staged or real) to stage growth there —
   chaining staged cells to extend a branch several cells in one phase is allowed
-- Above the surface: stages a tree cell (Branch mode) or leaf (Leaf mode)
-- Below the surface in soil: stages a tree cell (root); soil cell is consumed. Underground
-  root placements get a **high-contrast warm outline** (the faint above-ground hint is
-  invisible over tan soil — playtesters didn't realise they could dig roots down).
-- **"🍃 Fill leaves" button** (`autoFillLeaves`): one tap stages leaves across the open
-  canopy, top/sunniest spot first. Hand-placing dozens of leaves with a big budget was
-  tedious; this lets the player focus on trunk/branch/root shape. Hidden in winter (leaves
-  can't grow). **Reserve is season-aware (M9 Round 3):** spring & summer spend the *whole*
-  budget (leaves are pure income then — no reason to hold back), fall keeps a ~15% reserve
-  (the canopy is about to drop and winter is dormant). Guarded by `planning.test.ts`.
+- Above the surface: stages a branch (wood). Below the surface in soil: stages a root
+  (wood); soil cell is consumed. Underground root placements get a **high-contrast warm
+  outline** (the faint above-ground hint is invisible over tan soil — playtesters didn't
+  realise they could dig roots down). A branch may also be staged over an existing leaf
+  (it grows up through the canopy, replacing that leaf).
 - In rock: rejected with a brief shake/feedback
 - Leaves, flowers, and fruit are terminal: nothing can attach to them
 - Staged cells render at 50% opacity with a **dashed white outline drawn around the
   perimeter of each contiguous staged group** (no dividers between adjacent staged cells)
 - Tap a staged cell to unstage it (energy refunded immediately). If that disconnects
   other staged cells from the tree, they unstage automatically with refunds.
-- Tap a live leaf to mark it for shedding (shed icon overlay); tap again to cancel.
-  Shedding resolves at season advance and refunds 0.5 energy per leaf.
+
+### Auto-leaves (M10)
+Leaf placement had no real strategy beyond "don't grow in deep shade" — which is the
+engine's own light math — so hand-placing (and the "🍃 Fill leaves" button, and shed-
+marking) was pure tedium. Leaves now **auto-grow**:
+- At each growing season's **tick 0** (`growAutoLeaves` in `sim/simulate.ts`), the tree
+  puts out leaves on every open above-ground hex adjacent to wood that is (a) at least
+  `MIN_LEAF_HEIGHT` (3) cells above the **spawn ground** and (b) **net-positive** — its
+  light income clears `AUTO_LEAF_MIN_GEN`. Greedy, recomputing self-shading each pass, so
+  it converges to a productive lit shell rather than a deep water-hungry stack.
+- Leaves are **free** (the player only spends energy on wood and flowers). The planning
+  canvas **previews** where the canopy will grow (faint green) as you shape wood, so the
+  height/width trade-off stays legible.
+- **`MIN_LEAF_HEIGHT` is the anti-crawler rule and is load-bearing.** Free auto-leaves
+  would otherwise let a flat ground-hugging sprawl carpet itself in unlimited full-sun,
+  un-self-shaded, short-water-path leaves (the "ground crawler") — in the harness it
+  out-scored a real tree ~5×. Gating on height *above the spawn ground* (not the per-column
+  surface, which is bumpy ±2-3 and the crawler exploited) makes the crawler non-viable
+  (harness: score ~1) while a balanced grower wins (~23) and a fresh seed (energy 8) can
+  still build a height-3 trunk turn one and bootstrap. Validated in `cli/play.ts`
+  (strategy sweep) and `sim/simulate.test.ts` (`growAutoLeaves`).
+- The deciduous cycle is unchanged otherwise: the canopy auto-drops at fall's end
+  (`resolveAutumnDrop`, 75% resorb) and the tree is bare entering winter.
 
 ### Modes
-A small mode toggle in the HUD: **Branch / Leaf / Flower**. Flower mode appears only
-in spring planning phases, and only after the "Reach 30 cells" milestone.
+A small mode toggle in the HUD: **Wood / Flower**. It appears only in spring planning
+phases after the "Reach 30 cells" milestone (when flowers unlock) — otherwise everything
+the player places is wood, so no toggle is shown.
 
 ### Flower placement rules (relaxed in M9 playtest)
 - Spring planning only, and only after the "Reach 30 cells" milestone
@@ -577,6 +629,10 @@ See "Flowers, Fruit, and the Annual Reproductive Cycle" for the full lifecycle.
   before you confirm ("Prune — 9 cells will be removed")
 - Pruning that would isolate the entire canopy from the roots gets an extra
   confirmation step
+- Pruning that would remove the **entire living tree** (every cell, e.g. the lone seed)
+  is **blocked** — the Prune button disables with an explanation (`removesEntireTree` in
+  `game/prune.ts`, guarded in both the inspector and bulk-prune mode). Use "Plant a new
+  seed" to start over. (Playtest bug: you could prune a single-cell tree out of existence.)
 - Winter is mechanically the ideal pruning season (nothing else useful to do, and
   reshaping before spring growth) — let players discover this rather than telling them
 
@@ -616,7 +672,7 @@ React chrome over a full-viewport Canvas.
 - Energy available ("⚡ 47")
 - Current goal + progress
 - Seed score ("🌰 4")
-- Mode toggle (Branch / Leaf / Flower) and Advance Season button
+- Mode toggle (Wood / Flower — flower only in spring once unlocked) and Advance Season button
 
 ### On demand
 - Cell inspector (tap a cell)
@@ -745,7 +801,8 @@ feeds into that answer.
 2. A single seed cell sits at the center surface, half-buried: type `'tree'`,
    water 5, energy 8, health 1.0
 3. First planning phase, early **Spring, Year 1**: enough energy for a few cells.
-   The natural first moves — a leaf above, a root below — teach the whole game.
+   The natural first moves — grow a branch up (the canopy auto-leafs once it's tall
+   enough), a root below — teach the whole game.
 4. Light hint overlay for the first 2–3 seasons; dismissible; never shown again
 
 ---
@@ -937,8 +994,37 @@ drought instead of crashing to 0 (see Metabolic consumption; new diagnostic `cli
 which proved deep roots alone were *not* a canopy-drought defence). (15) The season-summary
 delta colour was hard-coded green, so a storm's **−95 living cells read as a "good" green** —
 now sign-aware (green gain / red loss / grey neutral) for both energy and cells.
-**Use this harness (`play.ts`, `experiments.ts`, `recover.ts`, `water.ts`) to validate any
-future balance change before shipping it.**
+**Use this harness (`play.ts`, `experiments.ts`, `recover.ts`, `water.ts`, `winter.ts`) to
+validate any future balance change before shipping it.**
+
+### Milestone 10 — Workload reduction & save diagnostics ✅ built
+A pass of playtest-driven UX/balance work (brother's second playthrough):
+- **Resource-flow overlay** (💧/⚡ HUD toggles), **altitude ruler**, **clearer next-season
+  label**, and **bulk speed-prune mode** (tap-to-select; `prune.computeMultiRemoval`).
+- **Save-file diagnostic** (`game/diagnose.ts`) — a dense health report (parasite leaves,
+  water supply/demand, wood health, flower-anchor lockout, energy headroom). App logs it to
+  the browser console on load and exposes `treegameDiagnose()`; `cli/diagnose.ts` runs it on
+  a saved JSON. The way to share a run as text, not a screenshot.
+- **Winter wood die-off fix** — dry structural wood floors at `WOOD_DRY_HEALTH` (0.5)
+  instead of decaying to deadwood; thirst never kills wood (only rot/storms/pruning). Stopped
+  big deciduous trees shedding their upper structure to deadwood every winter. Validated in
+  `cli/winter.ts`.
+- **Auto-leaves** — the canopy auto-grows (free) and the player only shapes wood/flowers;
+  Leaf mode, Fill Leaves, and shed-marking are gone. See "Auto-leaves" for the design and the
+  `MIN_LEAF_HEIGHT` anti-crawler rule. Re-validated the full strategy sweep (balanced ~23
+  wins; crawler ~1, dead) and the recovery snowball.
+- **Carbon–water coupling** — photosynthesis now scales with leaf water (`photoWaterFactor`),
+  so the water system caps energy income and over-building self-corrects instead of banking a
+  meaningless ~900 surplus. See "Carbon–water coupling" under Metabolic consumption. New
+  harness tool `cli/bigtree.ts` guards against the runaway.
+- **Prune guard** — can't prune the entire tree away (`removesEntireTree`); see Pruning.
+- **Known limitation (height incentive):** with no competing trees, a low/wide canopy is
+  naturally *good* at reproduction (wide, well-watered, low storm-moment), so the height
+  incentive is currently artificial. The harness shows the crawler is either **dominant**
+  (if it can grow leaves low) or **dead** (walled by `MIN_LEAF_HEIGHT`) — there's no natural
+  "viable but worse" middle, because energy-scarcity (the coupling) doesn't touch a
+  well-watered low canopy. A genuine soft height incentive needs the deferred multi-tree
+  **shade competition**; until then the wall stays.
 
 ### Deferred — Rot
 (Was Milestone 9; moved to Decisions Deferred.) Infection sites, spread, free pruning of

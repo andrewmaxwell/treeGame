@@ -3,7 +3,6 @@ import {
   createPlanningState,
   handleTap,
   applySeasonAdvance,
-  autoFillLeaves,
   bankedEnergy,
   type PlanningState,
 } from './planning'
@@ -42,7 +41,7 @@ function mkCell(
 }
 
 // Stage a cell via handleTap and assert it succeeded.
-function stage(q: number, r: number, mode: 'branch' | 'leaf', game: GameState, p: PlanningState): PlanningState {
+function stage(q: number, r: number, mode: 'branch' | 'flower', game: GameState, p: PlanningState): PlanningState {
   const result = handleTap(q, r, mode, game, p)
   expect(result.kind).toBe('placed')
   return result.planning!
@@ -79,38 +78,21 @@ describe('applySeasonAdvance — energy economy', () => {
     expect(bankedEnergy(after.cells)).toBeCloseTo(8, 5)
   })
 
-  it('shedding is budget-neutral and does NOT drop the leaf at advance', () => {
-    // Resorption now happens at season END (in the sim), not at advance — so the
-    // leaf is still present after advance, and marking it costs nothing now.
-    const game = makeState([
-      mkCell(0,  0, 'tree', { energy: 4 }),
-      mkCell(0, -1, 'leaf', { energy: 2 }),
-    ])
-    let p = createPlanningState(6)
-    const result = handleTap(0, -1, 'leaf', game, p)  // leaf mode on a real leaf → shed mark
-    expect(result.kind).toBe('shed_toggled')
-    p = result.planning!
-    expect(p.energySpent).toBe(0)                      // budget-neutral
-
-    const after = applySeasonAdvance(game, p)
-    expect(after.cells.has(hexKey(0, -1))).toBe(true)  // leaf survives advance; sim drops it
-  })
-
-  it('staging a branch over a shed-marked leaf clears the mark; the branch survives advance', () => {
+  it('staging a branch over a leaf replaces it; the branch survives advance', () => {
+    // Leaves auto-grow, but the player can still grow wood up through the canopy — the
+    // tapped leaf is replaced by the staged branch (cost 1).
     const game = makeState([
       mkCell(0,  0, 'tree', { energy: 8 }),
       mkCell(0, -1, 'leaf', { energy: 2 }),
     ])
     let p = createPlanningState(10)
-    p = handleTap(0, -1, 'leaf', game, p).planning!    // mark leaf for shedding
-    p = stage(0, -1, 'branch', game, p)                // then stage a branch over it
-    expect(p.shedMarked.size).toBe(0)                  // mark cleared
-    expect(p.energySpent).toBeCloseTo(1, 5)            // shedding is free, +1 for the branch
+    p = stage(0, -1, 'branch', game, p)                // stage a branch over the leaf
+    expect(p.energySpent).toBeCloseTo(1, 5)            // +1 for the branch
 
     const after = applySeasonAdvance(game, p)
     const cell = after.cells.get(hexKey(0, -1))
     expect(cell).toBeDefined()
-    expect(cell!.type).toBe('tree')                    // staged branch survived
+    expect(cell!.type).toBe('tree')                    // staged branch replaced the leaf
     expect(cell!.staged).toBeUndefined()               // staged flag fully dropped
   })
 
@@ -131,35 +113,6 @@ describe('applySeasonAdvance — energy economy', () => {
     const after = applySeasonAdvance(game, createPlanningState(5))
     expect(after.season).toBe('spring')
     expect(after.year).toBe(4)
-  })
-})
-
-// ─── auto-fill leaves: season-aware reserve ──────────────────────────────────
-describe('autoFillLeaves — season-aware reserve', () => {
-  // A trunk reaching well above ground so there are plenty of valid leaf spots; a big
-  // budget so the reserve fraction is what bounds spending, not the spot count.
-  function trunkState(season: GameState['season']): GameState {
-    const cells: Cell[] = [mkCell(0, 0, 'tree')]
-    for (let r = -1; r >= -6; r--) cells.push(mkCell(0, r, 'tree'))
-    return { ...makeState(cells), season }
-  }
-
-  // Budget 12 with the leaf cost of 1 each: small enough that the reserve fraction (not
-  // the spot count) is what bounds spending, so spring (0 reserve) vs fall (0.15) differ.
-  it('spends its full budget in spring (no reserve held back)', () => {
-    const after = autoFillLeaves(trunkState('spring'), createPlanningState(12))
-    expect(after.energySpent).toBe(12)
-  })
-
-  it('keeps a reserve in fall', () => {
-    const after = autoFillLeaves(trunkState('fall'), createPlanningState(12))
-    expect(after.energySpent).toBeLessThan(12)          // ~10–11: stops at the 15% reserve
-    expect(after.energySpent).toBeGreaterThanOrEqual(10)
-  })
-
-  it('does nothing in winter', () => {
-    const after = autoFillLeaves(trunkState('winter'), createPlanningState(12))
-    expect(after.energySpent).toBe(0)
   })
 })
 

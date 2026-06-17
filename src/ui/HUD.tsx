@@ -1,12 +1,14 @@
 import styles from './HUD.module.css'
 import type { PlacementMode } from '../game/planning'
 import type { Season } from '../game/state'
+import type { ResourceOverlay } from '../render/colors'
 
 export interface ForecastDisplay {
   monthRange: string      // "Mar–May"
   weatherIcon: string     // this season's exact conditions
   weatherLabel: string
   nextSeasonLabel: string // "Summer"
+  nextSeasonMeaning: string // what that season means for the tree ("peak sun, water stress")
   nextForecast: string    // reliable general forecast
 }
 
@@ -28,8 +30,15 @@ interface HUDProps {
   isPlaying: boolean
   playbackProgress: number  // 0–1
   playbackStats: { water: number; energy: number } | null  // live totals during playback
+  overlay: ResourceOverlay      // active resource-flow view
+  onOverlayChange: (o: ResourceOverlay) => void
+  pruneMode: boolean            // bulk-prune selection active
+  pruneCount: number            // cells the current selection would remove
+  pruneCost: number             // energy cost to seal those wounds
+  pruneRemovesAll: boolean      // selection would wipe out the whole tree → blocked
+  onTogglePrune: () => void
+  onConfirmPrune: () => void
   onModeChange: (m: PlacementMode) => void
-  onAutoLeaf: () => void
   onAdvanceSeason: () => void
   onSkip: () => void
   onOpenGoals: () => void
@@ -47,8 +56,9 @@ const SEASON_LABEL: Record<Season, string> = {
 export function HUD({
   energyRemaining, energyTotal, season, year, score, forecast,
   currentGoal, completedGoals, showNudge, springReLeaf, flowerNoSpots, mode, flowerUnlocked, canAdvance,
-  isPlaying, playbackProgress, playbackStats,
-  onModeChange, onAutoLeaf, onAdvanceSeason, onSkip, onOpenGoals, onNewGame, onHelp,
+  isPlaying, playbackProgress, playbackStats, overlay, pruneMode, pruneCount, pruneCost, pruneRemovesAll,
+  onOverlayChange, onTogglePrune, onConfirmPrune,
+  onModeChange, onAdvanceSeason, onSkip, onOpenGoals, onNewGame, onHelp,
 }: HUDProps) {
   const energy = Math.floor(energyRemaining)
   const total = Math.floor(energyTotal)
@@ -68,11 +78,28 @@ export function HUD({
           <span className={styles.weatherNow} title="This season">
             {forecast.weatherIcon} {forecast.weatherLabel}
           </span>
-          <span className={styles.weatherNext} title="Next season (forecast)">
-            Next: {forecast.nextSeasonLabel} · {forecast.nextForecast}
+          <span className={styles.weatherNext} title="Next season — what's coming and what it means for your tree">
+            → Next: <b>{forecast.nextSeasonLabel}</b> · {forecast.nextSeasonMeaning}
+          </span>
+          <span className={styles.weatherForecast} title="Next season's forecast">
+            {forecast.nextForecast}
           </span>
         </div>
         <div className={styles.rightBlock}>
+          {/* Resource-flow view toggles — visible during planning AND playback so the
+              player can watch water climb and energy pool. Click the active one to turn off. */}
+          <div className={styles.overlayToggle}>
+            <button
+              className={`${styles.overlayBtn} ${overlay === 'water' ? styles.overlayBtnWater : ''}`}
+              onClick={() => onOverlayChange(overlay === 'water' ? 'none' : 'water')}
+              title="Water view — see moisture in the soil and water climbing the tree"
+            >💧</button>
+            <button
+              className={`${styles.overlayBtn} ${overlay === 'energy' ? styles.overlayBtnEnergy : ''}`}
+              onClick={() => onOverlayChange(overlay === 'energy' ? 'none' : 'energy')}
+              title="Energy view — see where sugar is made and where it pools"
+            >⚡</button>
+          </div>
           <span className={styles.score}>🌰 {score}</span>
           <button className={styles.goalsBtn} onClick={onOpenGoals} title="Goals achieved">
             🏅 {completedGoals}
@@ -125,10 +152,10 @@ export function HUD({
           </div>
         )}
 
-        {/* Spring re-leaf guidance — only when leaves actually dropped over winter */}
+        {/* Spring re-leaf reassurance — the canopy regrows on its own now */}
         {!isPlaying && springReLeaf && (
           <div className={styles.springHint}>
-            🌱 Your leaves dropped over winter. Switch to <b>Leaf</b> mode and grow a new canopy to restart photosynthesis.
+            🌱 Your canopy will <b>regrow automatically</b> this spring on the sunniest spots (shown in faint green). Just shape your <b>wood</b> — and bloom <b>flowers</b> if you like.
           </div>
         )}
 
@@ -142,7 +169,7 @@ export function HUD({
         {/* Gentle unspent-energy nudge (early years, growth seasons only) */}
         {!isPlaying && showNudge && (
           <div className={styles.nudge}>
-            You have energy to spare — grow some roots or leaves before advancing.
+            You have energy to spare — extend your roots or branches before advancing.
           </div>
         )}
 
@@ -153,47 +180,60 @@ export function HUD({
               <span className={styles.playingLabel}>Simulating…</span>
               <button className={styles.skipBtn} onClick={onSkip}>Skip →</button>
             </>
+          ) : pruneMode ? (
+            <>
+              <span className={`${styles.energy} ${energyLow ? styles.energyLow : ''}`}>
+                ⚡ {energy} / {total}
+              </span>
+              <span className={styles.pruneHint}>
+                {pruneRemovesAll ? "⚠️ That's your whole tree — deselect some" : '✂️ Tap limbs to prune'}
+              </span>
+              <button className={styles.pruneCancelBtn} onClick={onTogglePrune}>Done</button>
+              <button
+                className={styles.pruneConfirmBtn}
+                onClick={onConfirmPrune}
+                disabled={pruneCount === 0 || pruneRemovesAll || pruneCost > energy}
+                title={pruneRemovesAll ? "Can't prune your whole tree" : pruneCost > energy ? 'Not enough energy to seal the wounds' : undefined}
+              >
+                Prune {pruneCount} {pruneCount === 1 ? 'cell' : 'cells'}
+                {pruneCost > 0 && <span className={styles.pruneConfirmCost}> ⚡{pruneCost}</span>}
+              </button>
+            </>
           ) : (
             <>
               <span className={`${styles.energy} ${energyLow ? styles.energyLow : ''}`}>
                 ⚡ {energy} / {total}
               </span>
 
-              <div className={styles.modeToggle}>
-                <button
-                  className={`${styles.modeBtn} ${mode === 'branch' ? styles.modeBtnActive : ''}`}
-                  onClick={() => onModeChange('branch')}
-                  title="Grow woody cells: roots below ground, trunk/branches above"
-                >
-                  {mode === 'branch' ? '● ' : ''}Wood
-                </button>
-                <button
-                  className={`${styles.modeBtn} ${mode === 'leaf' ? styles.modeBtnActive : ''}`}
-                  onClick={() => onModeChange('leaf')}
-                  title="Grow leaves above ground (they photosynthesize)"
-                >
-                  {mode === 'leaf' ? '● ' : ''}Leaf
-                </button>
-                {flowerUnlocked && (
+              {/* Leaves auto-grow on well-lit canopy hexes — the player only shapes wood
+                  (and flowers in spring). The toggle appears only once flowers unlock,
+                  since otherwise everything you place is wood. */}
+              {flowerUnlocked && (
+                <div className={styles.modeToggle}>
+                  <button
+                    className={`${styles.modeBtn} ${mode === 'branch' ? styles.modeBtnActive : ''}`}
+                    onClick={() => onModeChange('branch')}
+                    title="Grow woody cells: roots below ground, trunk/branches above"
+                  >
+                    {mode === 'branch' ? '● ' : ''}Wood
+                  </button>
                   <button
                     className={`${styles.modeBtn} ${mode === 'flower' ? styles.modeBtnActive : ''}`}
                     onClick={() => onModeChange('flower')}
-                    title="Bloom flowers on healthy branch tips (3⚡ each, spring only) — they set fruit for seeds"
+                    title="Bloom flowers on healthy branches (3⚡ each, spring only) — they set fruit for seeds"
                   >
                     {mode === 'flower' ? '● ' : ''}Flower
                   </button>
-                )}
-              </div>
-
-              {season !== 'winter' && (
-                <button
-                  className={styles.autoLeafBtn}
-                  onClick={onAutoLeaf}
-                  title="Fill the open canopy with leaves automatically (spends your full budget in spring/summer; keeps a small reserve in fall)"
-                >
-                  🍃 Fill leaves
-                </button>
+                </div>
               )}
+
+              <button
+                className={styles.pruneToggleBtn}
+                onClick={onTogglePrune}
+                title="Prune several limbs at once — tap each to select, then confirm"
+              >
+                ✂️ Prune
+              </button>
 
               <button
                 className={styles.advanceBtn}

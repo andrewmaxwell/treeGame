@@ -213,6 +213,98 @@ export function stomataFactor(water: number): number {
   return STOMA_MIN + (1 - STOMA_MIN) * (water / STOMA_FULL)
 }
 
+// Leaf energy upkeep per tick (see metabolize), and the margin a hex's light income must
+// clear for an auto-grown leaf to be worth it. The margin (>1) keeps the canopy a productive
+// SHELL rather than a deep stack of barely-breakeven leaves that would over-draw water — the
+// exact over-packed-canopy failure auto-leaves is meant to prevent. Tuned against the harness.
+export const LEAF_ENERGY_UPKEEP = 0.02
+export const AUTO_LEAF_MIN_GEN = LEAF_ENERGY_UPKEEP * 1.3
+// Leaves auto-grow only at least this many cells above the SPAWN ground (surfaceR(0), the
+// stable reference — not the per-column surface, which is bumpy ±2-3 and would let a flat
+// ground-hugging row count as "tall" over the dips). This is the load-bearing anti-exploit
+// rule: without it, free auto-leaves let a ground-hugging sprawl carpet itself in unlimited
+// full-sun (un-self-shaded) leaves with short water paths — the "ground crawler" — which
+// out-scored a real tree ~5×. Requiring height enforces the core trade-off (grow a trunk to
+// earn a canopy, then widen it to water that canopy). Low enough that a fresh seed (energy
+// 8) can build a height-3 trunk turn one and start photosynthesizing — no bootstrap lock.
+export const MIN_LEAF_HEIGHT = 3
+
+// Auto-grow the canopy: the tree puts out leaves on every open above-ground hex adjacent to
+// wood where a leaf's light income clears AUTO_LEAF_MIN_GEN, filling top-/sunniest-first and
+// recomputing self-shading each pass so it never keeps a leaf another shades into deficit.
+// This REPLACES manual leaf placement — the player shapes WOOD and the canopy follows the
+// light. A ground-hugging or deeply-shaded hex never clears the bar (height-light factor +
+// self-shading), so the canopy can't sprawl into parasites and the old crawler stays dead.
+// New leaves are free and enter like any growth (water 2, energy 1, age 0). Pure.
+function autoLeafFill(state: GameState, sunAngleDeg: number, intensity: number): { cells: Map<string, Cell>; added: Set<string> } {
+  const work = new Map(state.cells)
+  const added = new Set<string>()
+  const groundR = surfaceR(0)  // stable spawn-ground reference for the height gate
+  const mkLeaf = (q: number, r: number): Cell => ({ q, r, type: 'leaf', water: 2, energy: 1, health: 1, rot: 0, age: 0 })
+
+  for (let pass = 0; pass < 40; pass++) {
+    // Candidate hexes: empty air, adjacent to wood, above the local surface, AND at least
+    // MIN_LEAF_HEIGHT above the spawn ground (so a low flat sprawl earns no canopy).
+    const candidates = new Set<string>()
+    for (const cell of work.values()) {
+      if (cell.type !== 'tree') continue
+      for (const [dq, dr] of HEX_NEIGHBORS) {
+        const q = cell.q + dq, r = cell.r + dr
+        if (r >= surfaceR(q)) continue              // not buried (above its local surface)
+        if (groundR - r < MIN_LEAF_HEIGHT) continue // high enough above the spawn ground
+        const k = hexKey(q, r)
+        if (!work.has(k)) candidates.add(k)         // empty (air)
+      }
+    }
+    if (candidates.size === 0) break
+
+    // Tentatively place a leaf on every candidate, compute the resulting (self-shaded)
+    // light, then keep only the ones still clearing the bar. Within a sun-column the
+    // 0.65/cell falloff means only the top few survive, so this converges to a lit shell.
+    const trial = new Map(work)
+    for (const k of candidates) {
+      const [q, r] = k.split(',').map(Number)
+      trial.set(k, mkLeaf(q, r))
+    }
+    const light = computeLight({ ...state, cells: trial }, sunAngleDeg)
+
+    let addedThisPass = false
+    for (const k of candidates) {
+      const [q, r] = k.split(',').map(Number)
+      const gen = (light.get(k) ?? 0) * intensity * PHOTO_COEFF * heightLightFactor(q, r)
+      if (gen > AUTO_LEAF_MIN_GEN) { work.set(k, mkLeaf(q, r)); added.add(k); addedThisPass = true }
+    }
+    if (!addedThisPass) break
+  }
+  return { cells: work, added }
+}
+
+// Grow the canopy for the season being simulated (called at growing-season tick 0).
+export function growAutoLeaves(state: GameState, weather: SeasonWeather): GameState {
+  return { ...state, cells: autoLeafFill(state, weather.sunAngleDeg, weather.intensity).cells }
+}
+
+// Keys auto-leaves would occupy for a given state + season light — for the planning preview.
+export function autoLeafPreview(state: GameState, sunAngleDeg: number, intensity: number): Set<string> {
+  return autoLeafFill(state, sunAngleDeg, intensity).added
+}
+
+// Carbon–water coupling: a dry leaf fixes less carbon (closed stomata admit less CO₂).
+// Photosynthesis scales by the leaf's own water — full at `PHOTO_WATER_FULL`, ramping to
+// `PHOTO_WATER_MIN` as water → 0. This is what makes the WATER SYSTEM (trunk width + roots,
+// the conduction cap) the real cap on energy income: a canopy you can't water can't print
+// energy, so you can't out-build your hydraulics. (Previously photosynthesis was purely
+// light-driven and a bone-dry over-built canopy still banked unlimited energy — the runaway
+// surplus that made energy meaningless.) It's safe to couple now that the canopy auto-grows
+// fresh and free each spring: a small recovering tree's canopy sits near its roots and stays
+// well-watered, so this throttles only genuinely over-extended canopies, not recovery.
+export const PHOTO_WATER_FULL = 2.5
+export const PHOTO_WATER_MIN = 0.15
+export function photoWaterFactor(water: number): number {
+  if (water >= PHOTO_WATER_FULL) return 1
+  return PHOTO_WATER_MIN + (1 - PHOTO_WATER_MIN) * (water / PHOTO_WATER_FULL)
+}
+
 // Photosynthesis: leaf cells turn light into energy. Non-leaf cells receive energy
 // only via diffusion — so canopy structure, not bulk, drives the energy economy.
 export function photosynthesize(state: GameState, light: Map<string, number>, intensity: number): GameState {
@@ -221,7 +313,7 @@ export function photosynthesize(state: GameState, light: Map<string, number>, in
     if (cell.type !== 'leaf') continue
     const ll = light.get(key)
     if (ll === undefined) continue
-    const gain = ll * intensity * PHOTO_COEFF * heightLightFactor(cell.q, cell.r)
+    const gain = ll * intensity * PHOTO_COEFF * heightLightFactor(cell.q, cell.r) * photoWaterFactor(cell.water)
     if (gain <= 0) continue
     work.set(key, { ...cell, energy: Math.min(cell.energy + gain, CELL_ENERGY_CAP) })
   }
@@ -245,7 +337,7 @@ function metabolize(state: GameState, mult: number): GameState {
       // a surplus that snowballs, so a brutally-pruned tree genuinely recovers (verified in
       // cli/recover.ts: spring budget climbs 8→14→29→49…). Structure is now cheap to keep.
       case 'tree':   w = 0.05; e = 0.005; break
-      case 'leaf':   w = 0.10; e = 0.02; break
+      case 'leaf':   w = 0.10; e = LEAF_ENERGY_UPKEEP; break
       case 'flower': w = 0.15; e = 0.10; break
       case 'fruit':  w = 0.20; e = 0.05; break
     }
@@ -418,7 +510,20 @@ export function diffuseEnergy(state: GameState, rng: RNG): GameState {
 //    on a far limb).
 const DEATH_THRESHOLD = 0.001
 export const WOOD_WATER_OK = 3      // wood at/above this water → full health
-export const WOOD_WATER_MIN = 0.5   // wood below this → dying
+// Health floor for dry structural wood. Thirst alone NEVER kills wood — a dry cell goes
+// dormant at half-health, not dead. Wood dies only from rot, storms, or pruning.
+//
+// Why (the deciduous bare-winter die-off): without a canopy there is no transpiration to
+// pull water up, so the upper structure of any sizeable tree inevitably dried to ~0 over
+// winter and the old `water ≤ 0.5 → target 0.0` rule then decayed it into deadwood every
+// single year — a *size-punishing* death with no counterplay (the bigger/taller the tree,
+// the more upper wood it shed each winter). It also manufactured the late-game "pile of
+// dead crap to prune" chore. Real branches don't die over a normal dormant winter; dry
+// sapwood just idles and re-hydrates when the canopy returns. Flooring at 0.5 keeps the
+// real consequences — dry wood is visibly half-grey and can't anchor a flower (>0.6) — and
+// the canopy challenge still bites where it should (LEAVES still need water AND energy and
+// still die). Validated against the harness sweeps + a tall-tree winter survival check.
+export const WOOD_DRY_HEALTH = 0.5
 export function updateHealth(state: GameState): GameState {
   const work = new Map(state.cells)
   for (const [key, cell] of state.cells) {
@@ -426,8 +531,8 @@ export function updateHealth(state: GameState): GameState {
 
     let target: number
     if (cell.type === 'tree') {
-      // Water-driven only — see note above.
-      target = cell.water > WOOD_WATER_OK ? 1.0 : cell.water > WOOD_WATER_MIN ? 0.5 : 0.0
+      // Water-driven, but thirst floors at WOOD_DRY_HEALTH — wood never dies of thirst.
+      target = cell.water > WOOD_WATER_OK ? 1.0 : WOOD_DRY_HEALTH
     } else {
       const hasWater  = cell.water  > 3
       const hasEnergy = cell.energy > 2
@@ -555,22 +660,6 @@ function depositResorb(work: Map<string, Cell>, leaf: Cell, amount: number): voi
   }
 }
 
-// Resolve shedding at SEASON END for a NON-fall season: each still-present shed leaf
-// resorbs most of its energy (LEAF_SHED_RESORB) back into the tree, then drops. (Marking
-// leaves outside fall is unusual but allowed.) Because this runs after the last tick,
-// shed leaves photosynthesize the whole season first.
-function resolveShedding(state: GameState, shedKeys: Set<string>): GameState {
-  if (shedKeys.size === 0) return state
-  const work = new Map(state.cells)
-  for (const key of shedKeys) {
-    const cell = work.get(key)
-    if (cell?.type !== 'leaf') continue  // already died/dropped during the season
-    depositResorb(work, cell, cell.energy * LEAF_SHED_RESORB)
-    work.delete(key)
-  }
-  return { ...state, cells: work }
-}
-
 // The deciduous drop, resolved at the END of FALL: the WHOLE canopy comes down and EVERY
 // leaf resorbs LEAF_SHED_RESORB (75%) of its energy into the wood — automatically, no
 // manual marking. (Originally the player had to tap each leaf to "shed" it for the good
@@ -656,6 +745,10 @@ function runTick(state: GameState, rng: RNG, weather: SeasonWeather, tick: numbe
   // Fall onset harvest: ripe fruit becomes seeds, the rest drops (before the canopy
   // photosynthesizes fall — the fruit's work was done over summer).
   if (tick === 0 && weather.season === 'fall') s = ripenFruit(s).state
+  // Growing-season onset: auto-grow the canopy on net-positive open hexes (replaces manual
+  // leaf placement). Not in winter (frost would kill it). Spring starts bare → full re-leaf;
+  // summer/fall top up any hexes opened by new wood. Fruit harvest above runs first.
+  if (tick === 0 && weather.season !== 'winter') s = growAutoLeaves(s, weather)
 
   const raining = weather.rain[tick]
   const light = computeLight(s, weather.sunAngleDeg)
@@ -693,10 +786,7 @@ export interface SeasonPlayback {
   storms: StormBreak[]
 }
 
-const NO_SHED: ReadonlySet<string> = new Set()
-export function runSeason(
-  state: GameState, rng: RNG, weather: SeasonWeather, shedKeys: ReadonlySet<string> = NO_SHED,
-): SeasonPlayback {
+export function runSeason(state: GameState, rng: RNG, weather: SeasonWeather): SeasonPlayback {
   let cur: GameState = { ...state, cells: buildWork(state) }
   const frames: GameState[] = []
   const storms: StormBreak[] = []
@@ -708,13 +798,10 @@ export function runSeason(
     if (res.break) storms.push({ frame: tick, ...res.break })
   }
   if (frames.length > 0) {
-    // Fall: the whole canopy drops automatically (deciduous), every leaf resorbing the
-    // full rate. Any other season: only the leaves the player explicitly marked to shed.
-    let last = weather.season === 'fall'
-      ? resolveAutumnDrop(frames[frames.length - 1])
-      : resolveShedding(frames[frames.length - 1], shedKeys as Set<string>)
-    // Spring: surviving flowers pollinate into fruit (the rest drop). After shedding so a
-    // stray spring shed resolves first; flowers and leaves don't interact.
+    // Fall: the whole canopy drops automatically (deciduous), every leaf resorbing the full
+    // rate into the wood. Other seasons keep their canopy (it regrew at tick 0 and persists).
+    let last = weather.season === 'fall' ? resolveAutumnDrop(frames[frames.length - 1]) : frames[frames.length - 1]
+    // Spring: surviving flowers pollinate into fruit (the rest drop).
     if (weather.season === 'spring') last = setFruit(last)
     last = ageCells(last)
     frames[frames.length - 1] = last
@@ -723,10 +810,8 @@ export function runSeason(
 }
 
 // Frames-only convenience wrapper — the shape the simulation tests assert against.
-export function simulateSeason(
-  state: GameState, rng: RNG, weather: SeasonWeather, shedKeys: ReadonlySet<string> = NO_SHED,
-): GameState[] {
-  return runSeason(state, rng, weather, shedKeys).frames
+export function simulateSeason(state: GameState, rng: RNG, weather: SeasonWeather): GameState[] {
+  return runSeason(state, rng, weather).frames
 }
 
 export { mulberry32 }

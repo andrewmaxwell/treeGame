@@ -52,21 +52,6 @@ function extendUp(g: Headless, steps: number) {
   }
 }
 
-// Put leaves on the upper canopy: above-ground tree cells in the top band get leaves.
-function leafCanopy(g: Headless, max: number) {
-  const valid = g.validPlacements('leaf')
-  let n = 0
-  // prefer higher (smaller r) spots
-  const keys = [...valid.entries()].filter(([, t]) => t === 'leaf').map(([k]) => k)
-  keys.sort((a, b) => Number(a.split(',')[1]) - Number(b.split(',')[1]))
-  for (const k of keys) {
-    if (n >= max) break
-    const [q, r] = k.split(',').map(Number)
-    if (g.place(q, r, 'leaf')) n++
-  }
-  return n
-}
-
 function widenTrunk(g: Headless, max: number) {
   // place wood next to existing above-ground trunk cells (branch mode), horizontally
   let n = 0
@@ -97,16 +82,15 @@ function rootDepth(g: Headless) {
 }
 function leafCount(g: Headless) { return countType(g, (c) => c.type === 'leaf') }
 
-// Disciplined grower. Priority order matters: LEAVES first (they make the energy that
-// pays for everything), then roots for water, then trunk width/height. Keep a reserve in
-// established seasons so growth's proportional energy cost doesn't crater health.
+// Disciplined grower. The canopy auto-grows on the lit hexes now, so the strategy just
+// shapes wood: roots for water, then a modest trunk + width. Keep a reserve in established
+// seasons so growth's proportional energy cost doesn't crater health.
 function balancedGrower(g: Headless) {
   const s = g.season
   if (s === 'winter') return
   if (s === 'fall') return  // canopy auto-sheds; nothing to do
 
-  const bare = leafCount(g) === 0
-  const cap = bare || g.year <= 1 ? 1.0 : 0.6
+  const cap = leafCount(g) === 0 || g.year <= 1 ? 1.0 : 0.6
   const under = () => g.spent < g.budget * cap
 
   // Structural targets are reached early, then frozen so upkeep stops creeping.
@@ -115,7 +99,6 @@ function balancedGrower(g: Headless) {
     if (aboveTrunkHeight(g) < 7 && under()) extendUp(g, 1)
     if (aboveTrunkHeight(g) >= 3 && under()) widenTrunk(g, 1)
   }
-  if (leafCount(g) < 14 && under()) leafCanopy(g, 4)
 
   if (s === 'spring') g.fill('flower', 6, 0.6)
 }
@@ -130,7 +113,6 @@ function flowerFocus(g: Headless) {
     if (aboveTrunkHeight(g) < 6) extendUp(g, 1)
     widenTrunk(g, 2)
   }
-  if (leafCount(g) < 14) leafCanopy(g, 5)
   if (s === 'spring') g.fill('flower', 30, 0.8)
 }
 
@@ -142,8 +124,7 @@ function tallGrower(g: Headless) {
   if (s === 'winter') { if (rootDepth(g) < 16) extendDown(g, 2); return }
   if (s === 'fall') return
 
-  const bare = leafCount(g) === 0
-  const cap = bare || g.year <= 1 ? 1.0 : 0.7
+  const cap = leafCount(g) === 0 || g.year <= 1 ? 1.0 : 0.7
   const under = () => g.spent < g.budget * cap
 
   if (g.year <= 4) {
@@ -151,7 +132,6 @@ function tallGrower(g: Headless) {
     if (aboveTrunkHeight(g) < 11 && under()) extendUp(g, 1)
     if (aboveTrunkHeight(g) >= 3 && under()) widenTrunk(g, 2)  // width for throughput
   }
-  if (leafCount(g) < 22 && under()) leafCanopy(g, 6)
   if (s === 'spring') g.fill('flower', 8, 0.7)
 }
 
@@ -168,7 +148,6 @@ function groundCrawler(g: Headless) {
   if (!isFinite(minQ)) g.place(0, sr - 1, 'branch')
   else for (let k = 0; k < 4; k++) { g.place(maxQ + 1 + k, sr - 1, 'branch'); g.place(minQ - 1 - k, sr - 1, 'branch') }
   if (g.year <= 2) extendDown(g, 2)
-  leafCanopy(g, 8)
   if (s === 'spring') g.fill('flower', 40, 0.85)
 }
 

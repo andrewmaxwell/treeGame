@@ -1,7 +1,8 @@
 import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle, type RefObject } from 'react'
 import { createCamera, clampZoom, screenToWorld, type Camera } from '../render/camera'
 import { drawScene, BASE_RADIUS } from '../render/renderer'
-import { computeLight } from '../sim/simulate'
+import type { ResourceOverlay } from '../render/colors'
+import { computeLight, autoLeafPreview } from '../sim/simulate'
 import { computeStructure } from '../sim/structure'
 import { SEASON_PARAMS } from '../sim/weather'
 import { pixelToHex, hexToPixel } from '../sim/grid'
@@ -27,6 +28,8 @@ interface GameCanvasProps {
   isPlaying:  boolean
   inspectedKey: string | null      // cell shown in the inspector (white outline)
   pruneSet: Set<string>            // cells a pending prune would remove (red overlay)
+  overlay: ResourceOverlay         // resource-flow view ('none' | 'water' | 'energy')
+  pruneMode: boolean               // bulk-prune selection active → hide placement hints
   onTap: (q: number, r: number) => void
 }
 
@@ -35,6 +38,17 @@ interface GameCanvasProps {
 function computePlanningLight(game: GameState, planning: PlanningState): Map<string, number> {
   if (planning.stagedCells.size === 0 && game.cells.size === 0) return EMPTY_LIGHT
   return computeLight({ ...game, cells: mergeStaged(game, planning) }, SEASON_PARAMS[game.season].sunAngleDeg)
+}
+
+const EMPTY_PREVIEW = new Set<string>()
+
+// Hexes the canopy will auto-grow leaves on this season, given the real + staged wood —
+// the planning preview so the player sees the prospective canopy as they shape the tree.
+// Empty in winter (frost) and during playback (the real leaves are already drawn).
+function computeLeafPreview(game: GameState, planning: PlanningState): Set<string> {
+  if (game.season === 'winter') return EMPTY_PREVIEW
+  const p = SEASON_PARAMS[game.season]
+  return autoLeafPreview({ ...game, cells: mergeStaged(game, planning) }, p.sunAngleDeg, p.intensity)
 }
 
 // game.cells overlaid with staged growth — the canopy the player is previewing. Used
@@ -73,7 +87,7 @@ function makeCamera(game: GameState): Camera {
 }
 
 export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
-  function GameCanvas({ gameRef, planningRef, modeRef, isPlaying, inspectedKey, pruneSet, onTap }, ref) {
+  function GameCanvas({ gameRef, planningRef, modeRef, isPlaying, inspectedKey, pruneSet, overlay, pruneMode, onTap }, ref) {
     const canvasRef    = useRef<HTMLCanvasElement>(null)
     const cameraRef    = useRef<Camera>(makeCamera(gameRef.current!))
     const rafRef       = useRef<number>(0)
@@ -81,6 +95,8 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
     const cssSizeRef   = useRef({ width: 0, height: 0 })
     const shakeUntilRef = useRef(0)  // performance.now() deadline
     const inspectRef   = useRef<{ key: string | null; prune: Set<string> }>({ key: null, prune: EMPTY_SET })
+    const overlayRef   = useRef<ResourceOverlay>(overlay)
+    const pruneModeRef = useRef(pruneMode)
 
     const panRef   = useRef({ dragging: false, lastX: 0, lastY: 0, moved: false })
     const pinchRef = useRef({ active: false, lastDist: 0 })
@@ -98,6 +114,18 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
       inspectRef.current = { key: inspectedKey, prune: pruneSet }
       dirtyRef.current = true
     }, [inspectedKey, pruneSet])
+
+    // Bridge the resource-overlay toggle into the render loop and force a redraw.
+    useEffect(() => {
+      overlayRef.current = overlay
+      dirtyRef.current = true
+    }, [overlay])
+
+    // Bridge the bulk-prune mode flag (hides placement hints while selecting).
+    useEffect(() => {
+      pruneModeRef.current = pruneMode
+      dirtyRef.current = true
+    }, [pruneMode])
 
     // ── Render loop ───────────────────────────────────────────────────────────
     useEffect(() => {
@@ -128,12 +156,15 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
         const p = planningRef.current
         const m = modeRef.current
         if (g && p && m) {
-          // During playback, hide placement highlights and staged cells
-          const vp = isPlaying ? new Map() : getValidPlacements(m, g, p)
+          // During playback (or bulk-prune selection), hide placement highlights
+          const planning = !isPlaying && !pruneModeRef.current
+          const vp = isPlaying || pruneModeRef.current ? new Map() : getValidPlacements(m, g, p)
           const staged = isPlaying ? new Map() : p.stagedCells
-          const shed   = isPlaying ? new Set<string>() : p.shedMarked
-          // During planning, show how much sun each leaf (real + staged) receives
-          // under the current season's sun angle, including staged-canopy shading.
+          // Auto-leaf preview: where the canopy will grow given the current (real+staged)
+          // wood. Shown only during planning (hidden in playback and bulk-prune).
+          const leafPreview = planning ? computeLeafPreview(g, p) : EMPTY_PREVIEW
+          // During planning, show how much sun each existing leaf receives under the
+          // current season's sun angle, including staged-canopy shading.
           const leafLight = isPlaying ? EMPTY_LIGHT : computePlanningLight(g, p)
           // Stress preview: real cells during playback (watch it redden under a storm),
           // real + staged during planning (see new growth's structural cost live).
@@ -142,7 +173,7 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
             : computeStructure(mergeStaged(g, p)).stress
           const insp = isPlaying ? null : inspectRef.current.key
           const prune = isPlaying ? EMPTY_SET : inspectRef.current.prune
-          drawScene(ctx, width, height, drawCam, g.cells, g.terrain, staged, shed, vp, leafLight, insp, prune, stress)
+          drawScene(ctx, width, height, drawCam, g.cells, g.terrain, staged, leafPreview, vp, leafLight, insp, prune, stress, overlayRef.current)
         }
       }
 

@@ -166,6 +166,21 @@ const SEASON_TREND: Record<Season, string> = {
   winter: 'cold ahead',
 }
 
+// What each season MEANS for the tree — a one-line "why it matters" shown next to the
+// upcoming-season label so the player can plan for it (playtest: "be more explicit about
+// what the next season is"). Distinct from the weather forecast (rain/storms): this is
+// the seasonal rhythm itself.
+const SEASON_MEANING: Record<Season, string> = {
+  spring: 'grow & flower',
+  summer: 'peak sun, water stress',
+  fall:   'harvest, then leaves drop',
+  winter: 'dormant — live on reserves',
+}
+
+export function seasonMeaning(season: Season): string {
+  return SEASON_MEANING[season]
+}
+
 export function seasonTrend(season: Season): string {
   return SEASON_TREND[season]
 }

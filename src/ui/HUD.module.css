@@ -52,10 +52,46 @@
   flex: 1;
 }
 .weatherNow  { font-size: 14px; font-weight: 600; }
-.weatherNext { font-size: 11px; color: rgba(255, 255, 255, 0.5); }
+/* The upcoming season needs to read clearly — playtesters found "Spring/Winter" alone
+   confusing, so this line is bumped up and the season name bolded. */
+.weatherNext { font-size: 12.5px; color: rgba(255, 255, 255, 0.82); }
+.weatherNext b { color: #ffe9a8; font-weight: 700; }
+.weatherForecast { font-size: 10.5px; color: rgba(255, 255, 255, 0.45); }
 
 .rightBlock { display: flex; align-items: center; gap: 10px; }
 .score  { font-size: 16px; }
+
+/* ── Resource-flow overlay toggle ─────────────────────────────────────────── */
+.overlayToggle {
+  display: flex;
+  gap: 4px;
+}
+.overlayBtn {
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 7px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  cursor: pointer;
+  filter: grayscale(0.5);
+  opacity: 0.7;
+  transition: background 0.15s, opacity 0.15s, filter 0.15s;
+  pointer-events: auto;
+}
+.overlayBtn:hover { opacity: 1; filter: none; }
+.overlayBtnWater {
+  background: rgba(70, 216, 255, 0.25);
+  border-color: rgba(70, 216, 255, 0.7);
+  opacity: 1;
+  filter: none;
+}
+.overlayBtnEnergy {
+  background: rgba(255, 225, 74, 0.25);
+  border-color: rgba(255, 225, 74, 0.7);
+  opacity: 1;
+  filter: none;
+}
 
 .goalsBtn {
   font-family: system-ui, sans-serif;
@@ -314,20 +350,62 @@
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
 }
 
-/* ── Auto-leaf button ────────────────────────────────────────────────────── */
-.autoLeafBtn {
-  padding: 7px 14px;
+/* ── Bulk-prune controls ─────────────────────────────────────────────────── */
+.pruneToggleBtn {
+  padding: 7px 12px;
   font-size: 13px;
   font-weight: 600;
   font-family: system-ui, sans-serif;
-  background: rgba(76, 175, 80, 0.18);
-  color: #b7e0b9;
-  border: 1px solid rgba(76, 175, 80, 0.4);
+  background: rgba(200, 90, 70, 0.16);
+  color: #f0b6a8;
+  border: 1px solid rgba(200, 90, 70, 0.4);
   border-radius: 8px;
   cursor: pointer;
   transition: background 0.15s;
 }
-.autoLeafBtn:hover { background: rgba(76, 175, 80, 0.3); }
+.pruneToggleBtn:hover { background: rgba(200, 90, 70, 0.3); }
+
+.pruneHint {
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+  color: #f0b6a8;
+  flex: 1;
+}
+
+.pruneCancelBtn {
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: system-ui, sans-serif;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.pruneCancelBtn:hover { background: rgba(255, 255, 255, 0.22); }
+
+.pruneConfirmBtn {
+  margin-left: auto;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: system-ui, sans-serif;
+  background: #b3492f;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.pruneConfirmBtn:hover:not(:disabled) { background: #cc5638; }
+.pruneConfirmBtn:disabled {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.3);
+  cursor: not-allowed;
+}
+.pruneConfirmCost { font-weight: 800; }
 
 /* ── Advance Season button ───────────────────────────────────────────────── */
 .advanceBtn {

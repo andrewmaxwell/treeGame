@@ -9,10 +9,8 @@ import {
   createPlanningState,
   handleTap,
   applySeasonAdvance,
-  resolvableShedKeys,
   computeReachable,
   getValidPlacements,
-  autoFillLeaves,
   bankedEnergy,
   CELL_COST,
   SPRING_VIGOR,
@@ -20,8 +18,12 @@ import {
   type PlacementMode,
 } from './game/planning'
 import { buildSeasonSummary, type SeasonSummaryData } from './game/summary'
+import { diagnoseReport } from './game/diagnose'
 import { evaluateGoals, currentGoal, completedMilestones, type GoalContext } from './game/goals'
-import { computeRemovalSet, pruneCost, seversWholeCanopy } from './game/prune'
+import {
+  computeRemovalSet, pruneCost, seversWholeCanopy, removesEntireTree,
+  computeMultiRemoval, pruneSelectionCost,
+} from './game/prune'
 import { loadGame, saveGame, clearSave } from './game/save'
 import { Intro } from './ui/Intro'
 import {
@@ -29,6 +31,7 @@ import {
   weatherHeadline,
   nextSeasonYear,
   seasonTrend,
+  seasonMeaning,
   SEASON_MONTHS,
   type SeasonWeather,
 } from './sim/weather'
@@ -36,6 +39,7 @@ import { runSeason, mulberry32, type StormBreak } from './sim/simulate'
 import { computeStructure } from './sim/structure'
 import { hexKey } from './sim/grid'
 import type { Cell } from './sim/cells'
+import type { ResourceOverlay } from './render/colors'
 import './App.css'
 
 const SEASON_LABEL: Record<Season, string> = {
@@ -51,6 +55,7 @@ interface InspectState {
   pruneSet: Set<string>
   cost: number
   severs: boolean
+  removesAll: boolean   // pruning this would wipe out the whole tree → blocked
   stress?: number   // structural stress for wood cells (undefined for terminals/terrain)
 }
 
@@ -70,7 +75,8 @@ function makeForecast(game: GameState): ForecastDisplay {
     weatherIcon: now.icon,
     weatherLabel: now.label,
     nextSeasonLabel: SEASON_LABEL[next.season],
-    nextForecast: `${nextHeadline.label} · then ${seasonTrend(twoOut.season)}`,
+    nextSeasonMeaning: seasonMeaning(next.season),
+    nextForecast: `Forecast: ${nextHeadline.icon} ${nextHeadline.label} · then ${seasonTrend(twoOut.season)}`,
   }
 }
 
@@ -135,6 +141,10 @@ export function App() {
   const [inspected, setInspected]      = useState<InspectState | null>(null)
   const [stormFlash, setStormFlash]    = useState<string | null>(null)
   const [playStats, setPlayStats]      = useState<{ water: number; energy: number } | null>(null)
+  const [overlay, setOverlay]          = useState<ResourceOverlay>('none')
+  // Bulk "speed prune": a selection of cells to remove in one confirm (playtest request).
+  const [pruneMode, setPruneMode]      = useState(false)
+  const [pruneSel, setPruneSel]        = useState<Set<string>>(() => new Set())
   const [showIntro, setShowIntro]      = useState(() => {
     try { return localStorage.getItem('treegame.introSeen') == null } catch { return false }
   })
@@ -148,6 +158,15 @@ export function App() {
   // Keep a ref to mode so the tap handler always sees the current value
   const modeRef = useRef<PlacementMode>('branch')
   useEffect(() => { modeRef.current = mode }, [mode])
+
+  // Diagnostics: print a dense health report to the console on page load, and expose
+  // `treegameDiagnose()` to re-run it any time (e.g. after playing a few seasons) — so
+  // the run can be shared as copyable text rather than an un-readable screenshot.
+  useEffect(() => {
+    const run = () => console.log(diagnoseReport(gameRef.current))
+    ;(window as unknown as { treegameDiagnose?: () => void }).treegameDiagnose = run
+    run()
+  }, [])
 
   // ── playback machinery ────────────────────────────────────────────────────
   const playbackRef = useRef<{
@@ -316,6 +335,21 @@ export function App() {
 
   const onTap = useCallback((q: number, r: number) => {
     if (isPlaying) return
+
+    // Bulk-prune mode: tap toggles a real (non-terrain) cell in the prune selection.
+    if (pruneMode) {
+      const key = hexKey(q, r)
+      const cell = gameRef.current.cells.get(key)
+      if (!cell || cell.type === 'soil' || cell.type === 'rock') return
+      setPruneSel((prev) => {
+        const next = new Set(prev)
+        if (next.has(key)) next.delete(key)
+        else next.add(key)
+        return next
+      })
+      return
+    }
+
     const result = handleTap(q, r, modeRef.current, gameRef.current, planningRef.current)
 
     if (result.kind === 'rejected_rock' || result.kind === 'rejected_energy' ||
@@ -330,7 +364,12 @@ export function App() {
       if (!cell) return
       const set = computeRemovalSet(gameRef.current.cells, key)
       const stress = computeStructure(gameRef.current.cells).stress.get(key)
-      setInspected({ key, cell, pruneSet: set, cost: pruneCost(cell), severs: seversWholeCanopy(gameRef.current.cells, set), stress })
+      setInspected({
+        key, cell, pruneSet: set, cost: pruneCost(cell),
+        severs: seversWholeCanopy(gameRef.current.cells, set),
+        removesAll: removesEntireTree(gameRef.current.cells, set),
+        stress,
+      })
       canvasRef.current?.requestDraw()
       return
     }
@@ -342,10 +381,10 @@ export function App() {
     planningRef.current = result.planning!
     syncDisplay(result.planning!)
     canvasRef.current?.requestDraw()
-  }, [isPlaying, syncDisplay])
+  }, [isPlaying, pruneMode, syncDisplay])
 
   const onPrune = useCallback(() => {
-    if (!inspected) return
+    if (!inspected || inspected.removesAll) return  // can't prune the whole tree away
     const { pruneSet, cost } = inspected
 
     // Remove the doomed cells immediately.
@@ -373,26 +412,73 @@ export function App() {
     canvasRef.current?.requestDraw()
   }, [inspected, syncDisplay])
 
+  // Enter/leave bulk-prune mode. Entering clears any open inspector and prior selection.
+  const onTogglePrune = useCallback(() => {
+    setInspected(null)
+    setPruneSel(new Set())
+    setPruneMode((v) => !v)
+    canvasRef.current?.requestDraw()
+  }, [])
+
+  // Confirm a bulk prune: remove the whole selection (+ everything it disconnects) in one
+  // breakage pass, accrue the wound-sealing cost, and refund any staged growth it severs.
+  const onConfirmPrune = useCallback(() => {
+    const cells = gameRef.current.cells
+    const removal = computeMultiRemoval(cells, pruneSel)
+    if (removal.size === 0) return
+    if (removesEntireTree(cells, removal)) return  // can't prune the whole tree away
+    if (seversWholeCanopy(cells, removal) &&
+        !window.confirm('This removes your whole canopy. Prune anyway?')) return
+
+    const cost = pruneSelectionCost(cells, pruneSel)
+    const newCells = new Map(cells)
+    for (const k of removal) newCells.delete(k)
+    gameRef.current = { ...gameRef.current, cells: newCells }
+
+    // Any staged growth now severed from the tree auto-unstages with a refund.
+    const pl = planningRef.current
+    const reachable = computeReachable(pl.stagedCells, gameRef.current)
+    const newStaged = new Map(pl.stagedCells)
+    let refund = 0
+    for (const k of [...newStaged.keys()]) {
+      if (!reachable.has(k)) { newStaged.delete(k); refund += CELL_COST }
+    }
+    planningRef.current = {
+      ...pl,
+      stagedCells: newStaged,
+      pruneCostAccrued: pl.pruneCostAccrued + cost,
+      energySpent: pl.energySpent + cost - refund,
+    }
+
+    setPruneMode(false)
+    setPruneSel(new Set())
+    syncDisplay(planningRef.current)
+    canvasRef.current?.requestDraw()
+  }, [pruneSel, syncDisplay])
+
   const onAdvanceSeason = useCallback(() => {
     if (isPlaying) return
     setInspected(null)
+    setPruneMode(false)
+    setPruneSel(new Set())
 
     // 0. Weather for the season being PLANNED (before the label advances). This is
     //    the single source of season truth for the simulation, so it stays correct
     //    even though applySeasonAdvance rolls the label forward to the next season.
     const cur = gameRef.current
     const weather = generateWeather(cur.season, cur.year, cur.worldSeed)
-    const shedKeys = resolvableShedKeys(cur, planningRef.current)
-    const shedThisTurn = shedKeys.size > 0
+    // The whole canopy auto-drops at fall's end (deciduous) — that's the "shed" event the
+    // milestone tracks, now automatic rather than a per-leaf chore.
+    const shedThisTurn = cur.season === 'fall'
 
     // 1. Commit staged cells → new game state (label advanced to the next season)
     const committed = applySeasonAdvance(cur, planningRef.current)
 
-    // 2. Run simulation under the planned season's weather; shed leaves resorb + drop
-    //    at season end (after photosynthesizing all season). Storm breaks come back
-    //    alongside the frames for the playback highlight + summary.
+    // 2. Run simulation under the planned season's weather. The canopy auto-grows at the
+    //    season's first tick and auto-drops at fall's end. Storm breaks come back alongside
+    //    the frames for the playback highlight + summary.
     const rng = mulberry32(committed.rngSeed)
-    const { frames, storms } = runSeason(committed, rng, weather, shedKeys)
+    const { frames, storms } = runSeason(committed, rng, weather)
     summaryInputRef.current = { committed, weather, shedThisTurn, storms }
 
     // 3. Animate
@@ -404,16 +490,6 @@ export function App() {
     modeRef.current = m
     canvasRef.current?.requestDraw()
   }, [])
-
-  // Fill the open canopy with leaves in one tap (keeps a small reserve), so a big budget
-  // doesn't mean dozens of manual placements. The player still shapes trunk/roots by hand.
-  const onAutoLeaf = useCallback(() => {
-    if (isPlaying) return
-    setInspected(null)
-    planningRef.current = autoFillLeaves(gameRef.current, planningRef.current)
-    syncDisplay(planningRef.current)
-    canvasRef.current?.requestDraw()
-  }, [isPlaying, syncDisplay])
 
   // Plant a new seed: clear the save and reset every bit of run state. Guarded by a
   // confirm because it discards the current tree.
@@ -444,6 +520,8 @@ export function App() {
     setGoalsView(goalsViewOf(fresh))
     setInspected(null)
     setStormFlash(null)
+    setPruneMode(false)
+    setPruneSel(new Set())
     canvasRef.current?.recenter()
     canvasRef.current?.requestDraw()
   }, [])
@@ -491,6 +569,12 @@ export function App() {
     energyTotal > 0 &&
     energyRemaining > 0.3 * energyTotal
 
+  // Bulk-prune preview: the full removal set (selection + everything it disconnects) is
+  // shown in red on the canvas, and its size/cost drive the HUD confirm button.
+  const pruneRemoval = pruneMode ? computeMultiRemoval(gameRef.current.cells, pruneSel) : EMPTY_PRUNE
+  const pruneSelCost = pruneMode ? pruneSelectionCost(gameRef.current.cells, pruneSel) : 0
+  const pruneRemovesAll = pruneMode && removesEntireTree(gameRef.current.cells, pruneRemoval)
+
   return (
     <div className="app-root">
       <GameCanvas
@@ -499,8 +583,10 @@ export function App() {
         planningRef={planningRef as RefObject<PlanningState>}
         modeRef={modeRef as RefObject<PlacementMode>}
         isPlaying={isPlaying}
-        inspectedKey={inspected?.key ?? null}
-        pruneSet={inspected?.pruneSet ?? EMPTY_PRUNE}
+        inspectedKey={pruneMode ? null : (inspected?.key ?? null)}
+        pruneSet={pruneMode ? pruneRemoval : (inspected?.pruneSet ?? EMPTY_PRUNE)}
+        overlay={overlay}
+        pruneMode={pruneMode}
         onTap={onTap}
       />
       <HUD
@@ -521,8 +607,15 @@ export function App() {
         isPlaying={isPlaying}
         playbackProgress={playbackProgress}
         playbackStats={playStats}
+        overlay={overlay}
+        onOverlayChange={setOverlay}
+        pruneMode={pruneMode}
+        pruneCount={pruneRemoval.size}
+        pruneCost={pruneSelCost}
+        pruneRemovesAll={pruneRemovesAll}
+        onTogglePrune={onTogglePrune}
+        onConfirmPrune={onConfirmPrune}
         onModeChange={onModeChange}
-        onAutoLeaf={onAutoLeaf}
         onAdvanceSeason={onAdvanceSeason}
         onSkip={onSkip}
         onOpenGoals={() => setGoalLogOpen(true)}
@@ -536,6 +629,7 @@ export function App() {
           cost={inspected.cost}
           affordable={energyRemaining >= inspected.cost}
           seversCanopy={inspected.severs}
+          removesAll={inspected.removesAll}
           stress={inspected.stress}
           onPrune={onPrune}
           onClose={() => setInspected(null)}

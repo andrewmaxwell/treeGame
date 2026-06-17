@@ -21,10 +21,11 @@ describe('multi-season economy sanity', () => {
   it('a sensible starter tree survives 3 seasons with a finite, positive budget', () => {
     let game = seedState()
 
-    // Season 1 plan: root below, trunk above, leaves on top (the "natural first moves")
+    // Season 1 plan: root below, trunk above. Leaves auto-grow on the canopy during the
+    // simulation now (the player only shapes wood), so the plan stages wood only.
     let p = createPlanningState(bankedEnergy(game.cells))
     expect(p.energyAvailable).toBe(8)
-    for (const [q, r, mode] of [[0, 1, 'branch'], [0, -1, 'branch'], [0, -2, 'branch'], [0, -3, 'leaf'], [1, -3, 'leaf']] as const) {
+    for (const [q, r, mode] of [[0, 1, 'branch'], [0, -1, 'branch'], [0, -2, 'branch']] as const) {
       const res = handleTap(q, r, mode, game, p)
       expect(res.kind).toBe('placed')
       p = res.planning!

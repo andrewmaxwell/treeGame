@@ -55,6 +55,28 @@ function waterTint(base: string, water: number, cap: number): string {
   return color
 }
 
+// ─── Resource-flow overlay (water / energy heatmap) ─────────────────────────────
+// A toggleable view that recolours every cell by how full it is of a resource, so the
+// player can see water climb the trunk and energy pool in the canopy — and read at a
+// glance which limbs are thirsty or starved (playtest: "more visibility into how
+// resources travel"). `level` is 0–1 (cell value / capacity).
+export type ResourceOverlay = 'none' | 'water' | 'energy'
+
+// Water: dry (dark warm grey) → mid blue → full bright cyan.
+// Energy: empty (dark) → amber → full bright gold.
+// Two-stop ramp so the low and high ends are both distinct.
+export function overlayColor(level: number, kind: 'water' | 'energy'): string {
+  const t = Math.max(0, Math.min(1, level))
+  if (kind === 'water') {
+    return t < 0.5
+      ? lerpColor('#3a2f2f', '#1f6f9e', t * 2)
+      : lerpColor('#1f6f9e', '#46d8ff', (t - 0.5) * 2)
+  }
+  return t < 0.5
+    ? lerpColor('#2e2a1c', '#c79016', t * 2)
+    : lerpColor('#c79016', '#ffe14a', (t - 0.5) * 2)
+}
+
 function lerpColor(a: string, b: string, t: number): string {
   const [r1, g1, b1] = parseColor(a)
   const [r2, g2, b2] = parseColor(b)

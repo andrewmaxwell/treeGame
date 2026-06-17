@@ -1,15 +1,18 @@
-// Multi-year deciduous-recovery guard. The death-spiral bug: after the winter
-// leaf-drop a tree could fall to 0 banked energy and never afford a leaf again —
-// permanent zombie stasis. This test plays a sensible tree (re-leaf each spring,
-// keep leaves through fall) and asserts its winter reserves GROW year over year.
+// Multi-year deciduous-recovery guard. The canopy now AUTO-GROWS each spring (leaves are
+// no longer hand-placed), so the death-spiral this once guarded — a leafless tree unable to
+// afford the 1 energy a leaf cost — can't happen anymore: leaves are free and regrow on
+// their own. These tests assert the positive story still holds: a tree that establishes wood
+// and grows modestly sees its winter reserves climb year over year (the snowball), and even
+// a wood-only plant (never touching the canopy) thrives because the canopy fills itself in.
 import { describe, it, expect } from 'vitest'
 import { simulateSeason } from '../sim/simulate'
 import { mulberry32 } from '../sim/rng'
 import { generateWeather } from '../sim/weather'
 import { hexKey } from '../sim/grid'
-import { TerrainGen } from '../sim/terrain'
+import { TerrainGen, surfaceR } from '../sim/terrain'
 import {
-  createPlanningState, handleTap, applySeasonAdvance, resolvableShedKeys, bankedEnergy, getValidPlacements, SPRING_VIGOR,
+  createPlanningState, handleTap, applySeasonAdvance, bankedEnergy, SPRING_VIGOR,
+  type PlanningState,
 } from './planning'
 import type { GameState } from './state'
 import type { Cell } from '../sim/cells'
@@ -20,126 +23,70 @@ function seedState(): GameState {
   return { cells, terrain: new TerrainGen(), season: 'spring', year: 1, score: 0, rngSeed: 1234, worldSeed: 1, goals: { completed: [], peakCells: 1 } }
 }
 
-function advance(game: GameState, plan: (g: GameState, p: ReturnType<typeof createPlanningState>) => ReturnType<typeof createPlanningState>): GameState {
+function advance(game: GameState, plan: (g: GameState, p: PlanningState) => PlanningState): GameState {
   const w = generateWeather(game.season, game.year, game.worldSeed)
-  // Mirror the app: spring budget is floored by the tree's vigor.
+  // Mirror the app: spring budget is floored by the tree's vigor (a wood-planting lifeline).
   const banked = bankedEnergy(game.cells)
   const budget = game.season === 'spring' ? Math.max(banked, SPRING_VIGOR) : banked
   const pl = plan(game, createPlanningState(budget))
-  const shed = resolvableShedKeys(game, pl)
   const committed = applySeasonAdvance(game, pl)
-  const frames = simulateSeason(committed, mulberry32(committed.rngSeed), w, shed)
+  const frames = simulateSeason(committed, mulberry32(committed.rngSeed), w)
   return frames[frames.length - 1]
 }
 
-function reLeaf(game: GameState, pl: ReturnType<typeof createPlanningState>) {
-  const budget = bankedEnergy(game.cells)
-  const spots = [...getValidPlacements('leaf', game, pl)]
-    .filter(([, t]) => t === 'leaf')
-    .map(([k]) => k.split(',').map(Number) as [number, number])
-    .sort((a, b) => a[1] - b[1])
-  const want = Math.max(1, Math.floor(budget) - 1)
-  let placed = 0
+// Stage a list of wood cells (leaves auto-grow, so plans only ever place wood).
+function placeWood(game: GameState, pl: PlanningState, spots: [number, number][]): PlanningState {
   for (const [q, r] of spots) {
-    if (placed >= want) break
-    const res = handleTap(q, r, 'leaf', game, pl)
-    if (res.kind === 'placed') { pl = res.planning!; placed++ }
+    const res = handleTap(q, r, 'branch', game, pl)
+    if (res.kind === 'placed') pl = res.planning!
   }
   return pl
 }
 
-function plant(game: GameState, pl: ReturnType<typeof createPlanningState>): ReturnType<typeof createPlanningState> {
-  if (game.season === 'spring' && game.year === 1) {
-    for (const [q, r, m] of [
-      [0, 1, 'branch'], [0, 2, 'branch'], [0, -1, 'branch'], [0, -2, 'branch'],
-      [-1, -2, 'leaf'], [1, -3, 'leaf'], [0, -3, 'leaf'],
-    ] as [number, number, 'branch' | 'leaf'][]) {
-      const res = handleTap(q, r, m, game, pl)
-      if (res.kind === 'placed') pl = res.planning!
+// Topmost trunk cell (smallest r) — the growing tip.
+function trunkTop(game: GameState): { q: number; r: number } {
+  let best = { q: 0, r: surfaceR(0) }
+  for (const c of game.cells.values()) if (c.type === 'tree' && c.r < best.r) best = { q: c.q, r: c.r }
+  return best
+}
+
+describe('multi-year deciduous recovery (auto-canopy)', () => {
+  it('a growing tree banks more each winter, year over year (the snowball)', () => {
+    let game = seedState()
+    const winterBanks: number[] = []
+    for (let i = 0; i < 12; i++) {
+      game = advance(game, (g, pl) => {
+        if (g.season !== 'spring') return pl
+        if (g.year === 1) {
+          // Establish: deep-ish roots + a starter trunk.
+          return placeWood(g, pl, [[0, 1], [0, 2], [0, 3], [0, -1], [0, -2], [0, -3]])
+        }
+        // Each later spring, extend the trunk up one (the canopy auto-expands to match).
+        const t = trunkTop(g)
+        return placeWood(g, pl, [[t.q, t.r - 1]])
+      })
+      if (game.season === 'winter') winterBanks.push(bankedEnergy(game.cells))
     }
-    return pl
-  }
-  return pl
-}
-
-// Shed every leaf at the start of fall (the strategy the game's milestone instructs).
-function shedAllLeaves(game: GameState, pl: ReturnType<typeof createPlanningState>) {
-  for (const c of game.cells.values()) {
-    if (c.type === 'leaf') {
-      const res = handleTap(c.q, c.r, 'leaf', game, pl)
-      if (res.kind === 'shed_toggled') pl = res.planning!
-    }
-  }
-  return pl
-}
-
-// Play 12 seasons re-leafing each spring; `fallSheds` toggles whether leaves are
-// shed at the start of fall. Returns the three recorded winter banked-energy totals.
-function playThreeYears(fallSheds: boolean): { winterBanks: number[]; alive: boolean } {
-  let game = seedState()
-  const winterBanks: number[] = []
-  for (let i = 0; i < 12; i++) {
-    game = advance(game, (g, pl) => {
-      if (g.season === 'spring' && g.year === 1) return plant(g, pl)
-      if (g.season === 'spring') return reLeaf(g, pl)
-      if (g.season === 'fall' && fallSheds) return shedAllLeaves(g, pl)
-      return pl
-    })
-    if (game.season === 'winter') winterBanks.push(bankedEnergy(game.cells))
-  }
-  return { winterBanks, alive: [...game.cells.values()].some((c) => c.type === 'tree') }
-}
-
-describe('multi-year deciduous recovery', () => {
-  it('keeping leaves through fall: winter reserves grow year over year (no spiral)', () => {
-    const { winterBanks, alive } = playThreeYears(false)
     expect(winterBanks.length).toBe(3)
     for (const b of winterBanks) expect(b).toBeGreaterThan(2)
     expect(winterBanks[1]).toBeGreaterThan(winterBanks[0])
     expect(winterBanks[2]).toBeGreaterThan(winterBanks[1])
-    expect(alive).toBe(true)
+    expect([...game.cells.values()].some((c) => c.type === 'tree')).toBe(true)
   })
 
-  it('a tree starved toward 0 energy can still recover via the spring vigor floor', () => {
-    // Build ONLY wood in spring Y1 (no leaves) — the classic new-player trap. With no
-    // photosynthesis the tree drains down and, leafless, can't afford the 1 energy a leaf
-    // costs without the floor. Re-leafing each spring (funded by the vigor floor) must pull
-    // it back to positive, snowballing production. (Since wood upkeep dropped to 0.005 the
-    // drain is gentle — the tree leans on the floor rather than hitting an exact 0, but the
-    // recovery story is the same: it depends on the floor, then climbs well past it.)
+  it('a wood-only plant still thrives — the canopy fills itself in', () => {
+    // The classic new-player move: spend the seed's reserve on wood and never "grow leaves".
+    // Once that was a softlock (couldn't afford a leaf); now the canopy auto-grows, so the
+    // tree feeds itself and stays comfortably alive.
     let game = seedState()
-    let leanedOnFloor = false
-    let recovered = false
+    game = advance(game, (g, pl) =>
+      g.season === 'spring' && g.year === 1
+        ? placeWood(g, pl, [[0, 1], [0, 2], [0, -1], [0, -2]])
+        : pl,
+    )
+    for (let i = 0; i < 11; i++) game = advance(game, (_g, pl) => pl)  // never plan again
 
-    for (let i = 0; i < 8; i++) {
-      game = advance(game, (g, pl) => {
-        if (g.season === 'spring' && g.year === 1) {
-          for (const [q, r] of [[0, 1], [0, 2], [0, -1], [0, -2]] as [number, number][]) {
-            const res = handleTap(q, r, 'branch', g, pl)
-            if (res.kind === 'placed') pl = res.planning!
-          }
-          return pl
-        }
-        if (g.season === 'spring') return reLeaf(g, pl)
-        return pl
-      })
-      if (bankedEnergy(game.cells) <= SPRING_VIGOR) leanedOnFloor = true
-      if (leanedOnFloor && bankedEnergy(game.cells) > SPRING_VIGOR + 2) recovered = true
-    }
-
-    expect(leanedOnFloor).toBe(true)  // it really did drain to where only the floor saved it
-    expect(recovered).toBe(true)      // …and climbed back out, banking well past the floor
-    expect([...game.cells.values()].some((c) => c.type === 'tree')).toBe(true)  // still alive
-  })
-
-  it('shedding at the start of fall (the instructed strategy) also thrives', () => {
-    // Regression: shedding used to drop leaves BEFORE fall ran, forfeiting fall's
-    // photosynthesis and starving the tree to a permanent 0-energy dead end. Now shed
-    // leaves work through fall and resorb at season end, so this path grows too.
-    const { winterBanks, alive } = playThreeYears(true)
-    expect(winterBanks.length).toBe(3)
-    for (const b of winterBanks) expect(b).toBeGreaterThan(5)
-    expect(winterBanks[2]).toBeGreaterThan(winterBanks[0])
-    expect(alive).toBe(true)
+    expect([...game.cells.values()].some((c) => c.type === 'tree')).toBe(true)
+    expect(bankedEnergy(game.cells)).toBeGreaterThan(2)
   })
 })

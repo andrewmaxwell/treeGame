@@ -15,11 +15,10 @@ export function Intro({ onDismiss }: Props) {
           Raise a tree through the seasons and make as many seeds as you can over its life.
         </p>
         <ul className={styles.steps}>
-          <li><b>Tap</b> next to your tree to grow a cell. Drag to pan, scroll/pinch to zoom.</li>
-          <li><b>Wood / Leaf</b> (bottom): wood below ground is roots (water), wood above is branches. <b>Leaves</b> make energy from sunlight.</li>
-          <li>You spend <b>⚡ energy</b> to grow. Leaves earn it back in spring and summer.</li>
-          <li>Each <b>fall</b>, shed your leaves to bank their energy before winter — kept on, frost wastes most of it.</li>
-          <li><b>Winter</b> is dormant: your tree lives on reserves. Use it to prune and reshape.</li>
+          <li><b>Tap</b> next to your tree to grow <b>wood</b>: below ground it's roots (water), above ground it's trunk and branches. Drag to pan, scroll/pinch to zoom.</li>
+          <li><b>Leaves grow on their own</b> on the sunniest spots once your branches are tall enough — shown in faint green. Grow up and out to earn a bigger canopy.</li>
+          <li>You spend <b>⚡ energy</b> to grow wood. The canopy earns it back in spring and summer (and drops on its own each fall, banking most of its energy).</li>
+          <li><b>Winter</b> is dormant: your tree lives on reserves. Use it to extend roots and prune.</li>
           <li>Watch the <b>🎯 goal</b> at the top — it guides you one step at a time.</li>
         </ul>
         <p className={styles.tip}>

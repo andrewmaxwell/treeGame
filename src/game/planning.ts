@@ -3,7 +3,10 @@ import { HEX_NEIGHBORS, hexKey } from '../sim/grid'
 import { surfaceR } from '../sim/terrain'
 import type { GameState, Season } from './state'
 
-export type PlacementMode = 'branch' | 'leaf' | 'flower'
+// Leaves are no longer placed by hand — they auto-grow on net-positive canopy hexes during
+// the simulation (see growAutoLeaves in sim/simulate.ts). The player shapes WOOD and (in
+// spring) FLOWERS; the canopy follows the light automatically.
+export type PlacementMode = 'branch' | 'flower'
 
 export const CELL_COST = 1     // energy cost per staged tree/leaf cell
 export const FLOWER_COST = 3   // energy cost per staged flower (spring only)
@@ -44,11 +47,8 @@ function canAfford(planning: PlanningState, cost: number): boolean {
 
 export interface PlanningState {
   stagedCells: Map<string, Cell>
-  shedMarked: Set<string>
   energyAvailable: number
-  // Tracks spending: +1 per staged cell, minus the proportional refund per
-  // shed-marked leaf (previews the season-advance refund so the live budget stays
-  // accurate). Also includes accrued prune wound-sealing costs.
+  // Tracks spending: +cost per staged cell, plus accrued prune wound-sealing costs.
   energySpent: number
   // Energy spent sealing prune wounds this planning phase. Pruning itself removes
   // cells from the game state immediately; this is only the deducted cost, applied
@@ -57,13 +57,12 @@ export interface PlanningState {
 }
 
 export function createPlanningState(energyAvailable: number): PlanningState {
-  return { stagedCells: new Map(), shedMarked: new Set(), energyAvailable, energySpent: 0, pruneCostAccrued: 0 }
+  return { stagedCells: new Map(), energyAvailable, energySpent: 0, pruneCostAccrued: 0 }
 }
 
 export type TapKind =
   | 'placed'
   | 'unstaged'
-  | 'shed_toggled'
   | 'inspect'
   | 'rejected_rock'
   | 'rejected_energy'
@@ -104,38 +103,24 @@ export function handleTap(
     const flower: Cell = { q, r, type: 'flower', water: 2, energy: 1, health: 1, rot: 0, age: 0, staged: true }
     const newStaged = new Map(planning.stagedCells)
     newStaged.set(key, flower)
-    // If a shed-marked leaf sat here, it's being replaced, not shed — clear the mark.
-    let newShed = planning.shedMarked
-    if (newShed.has(key)) { newShed = new Set(newShed); newShed.delete(key) }
     return {
       kind: 'placed',
-      planning: { ...planning, stagedCells: newStaged, shedMarked: newShed, energySpent: planning.energySpent + FLOWER_COST },
+      planning: { ...planning, stagedCells: newStaged, energySpent: planning.energySpent + FLOWER_COST },
     }
   }
 
-  // 2. Tapped a real leaf
+  // 2. Tapped a real leaf → stage wood here, replacing the leaf on advance (a branch
+  // growing up through the canopy). Leaves themselves aren't player-editable anymore.
   if (realCell?.type === 'leaf') {
-    if (mode === 'leaf') {
-      // leaf mode: toggle shed marker
-      return { kind: 'shed_toggled', planning: toggleShed(key, planning) }
-    }
-    // branch mode: stage a tree cell here, replacing the leaf on advance. If the leaf
-    // was shed-marked, clear the mark (it's being replaced, not shed). Shedding no
-    // longer affects the budget, so the cost is just the branch.
     if (game.season === 'winter') return { kind: 'rejected_winter' }  // above-ground frost-dies
     if (!canAfford(planning, CELL_COST)) return { kind: 'rejected_energy' }
     if (!isAdjacentToValidAnchor(q, r, game, planning)) return { kind: 'rejected_adjacent' }
     const replacement: Cell = { q, r, type: 'tree', water: 2, energy: 1, health: 1, rot: 0, age: 0, staged: true }
     const newStaged = new Map(planning.stagedCells)
     newStaged.set(key, replacement)
-    let newShed = planning.shedMarked
-    if (newShed.has(key)) {
-      newShed = new Set(newShed)
-      newShed.delete(key)
-    }
     return {
       kind: 'placed',
-      planning: { ...planning, stagedCells: newStaged, shedMarked: newShed, energySpent: planning.energySpent + CELL_COST },
+      planning: { ...planning, stagedCells: newStaged, energySpent: planning.energySpent + CELL_COST },
     }
   }
 
@@ -152,7 +137,7 @@ export function handleTap(
   // Adjacency check: must touch a real tree cell or staged tree cell (leaves are terminal)
   if (!isAdjacentToValidAnchor(q, r, game, planning)) return { kind: 'rejected_adjacent' }
 
-  // Underground (at or below surface) → always tree; above surface → type by mode
+  // Underground = at or below surface (a root); above = a branch. Both are wood.
   const underground = r >= surfaceR(q)
 
   // Winter dormancy: anything above ground frost-dies at winter onset, so don't let the
@@ -162,9 +147,8 @@ export function handleTap(
   // Energy check
   if (!canAfford(planning, CELL_COST)) return { kind: 'rejected_energy' }
 
-  const cellType: CellType = mode === 'leaf' && !underground ? 'leaf' : 'tree'
-
-  const newCell: Cell = { q, r, type: cellType, water: 2, energy: 1, health: 1, rot: 0, age: 0, staged: true }
+  // Every hand-placed cell is wood now (leaves auto-grow); underground = root, above = branch.
+  const newCell: Cell = { q, r, type: 'tree', water: 2, energy: 1, health: 1, rot: 0, age: 0, staged: true }
   const newStaged = new Map(planning.stagedCells)
   newStaged.set(key, newCell)
 
@@ -207,16 +191,6 @@ export function canPlaceFlower(q: number, r: number, game: GameState, planning: 
     if (healthyWoodAt(q + dq, r + dr, game, planning)) return true
   }
   return false
-}
-
-// Shedding is budget-neutral during planning: the energy resorbs back into the tree
-// at season end (in the simulation), so it shows up in next season's budget, not this
-// one. Marking only flags the leaf to drop-with-resorption when the season runs.
-function toggleShed(key: string, planning: PlanningState): PlanningState {
-  const newShed = new Set(planning.shedMarked)
-  if (newShed.has(key)) newShed.delete(key)
-  else newShed.add(key)
-  return { ...planning, shedMarked: newShed }
 }
 
 function unstageWithCascade(removedKey: string, planning: PlanningState, game: GameState): PlanningState {
@@ -286,11 +260,11 @@ export function getValidPlacements(
   mode: PlacementMode,
   game: GameState,
   planning: PlanningState,
-): Map<string, 'tree' | 'leaf' | 'flower'> {
+): Map<string, 'tree' | 'flower'> {
   if (mode === 'flower') return flowerPlacements(game, planning)
   if (!canAfford(planning, CELL_COST)) return new Map()
 
-  const valid = new Map<string, 'tree' | 'leaf' | 'flower'>()
+  const valid = new Map<string, 'tree' | 'flower'>()
 
   const anchors: Array<[number, number]> = []
   for (const [, cell] of game.cells) {
@@ -308,11 +282,10 @@ export function getValidPlacements(
 
       const existing = game.cells.get(nkey)
       if (existing) {
-        // Soil/rock cells in game.cells are terrain — can place on soil.
-        // Leaves can be replaced by a branch in branch mode.
+        // Soil/rock cells in game.cells are terrain — can place on soil. A branch may
+        // also grow up through a leaf (the leaf is replaced).
         const isTerrain = existing.type === 'soil' || existing.type === 'rock'
-        const isReplaceableLeaf = existing.type === 'leaf' && mode === 'branch'
-        if (!isTerrain && !isReplaceableLeaf) continue
+        if (!isTerrain && existing.type !== 'leaf') continue
       }
 
       const terrainCell = game.terrain.get(nq, nr)
@@ -321,8 +294,7 @@ export function getValidPlacements(
       const underground = nq !== undefined && nr >= surfaceR(nq)
       // Winter: only underground roots survive — don't offer above-ground spots.
       if (game.season === 'winter' && !underground) continue
-      const type: 'tree' | 'leaf' = mode === 'leaf' && !underground ? 'leaf' : 'tree'
-      valid.set(nkey, type)
+      valid.set(nkey, 'tree')
     }
   }
 
@@ -350,35 +322,6 @@ function flowerPlacements(game: GameState, planning: PlanningState): Map<string,
   return valid
 }
 
-// Auto-fill leaves on the open canopy — so the player doesn't hand-place dozens of leaves
-// with a big budget. Places top-first (highest cells get the most sun and shade the fewest
-// others). Reserve is season-aware: in spring & summer there's no reason to hold energy
-// back (leaves are pure income and you want maximum canopy), so it spends the lot; in fall
-// it keeps a small reserve since the canopy is about to drop and winter is dormant.
-// An explicit `reserveFraction` overrides the season default.
-export function autoFillLeaves(game: GameState, planning: PlanningState, reserveFraction?: number): PlanningState {
-  if (game.season === 'winter') return planning  // nothing above ground survives
-  if (reserveFraction === undefined) reserveFraction = game.season === 'fall' ? 0.15 : 0
-  const valid = getValidPlacements('leaf', game, planning)
-  const spots = [...valid.entries()].filter(([, t]) => t === 'leaf').map(([k]) => k)
-  // Top-first (smallest r), then outermost (largest |pixel-x|) — sunniest spots first.
-  spots.sort((a, b) => {
-    const [aq, ar] = a.split(',').map(Number)
-    const [bq, br] = b.split(',').map(Number)
-    if (ar !== br) return ar - br
-    return Math.abs(bq + br / 2) - Math.abs(aq + ar / 2)
-  })
-  const reserve = planning.energyAvailable * reserveFraction
-  let p = planning
-  for (const key of spots) {
-    if (p.energyAvailable - p.energySpent - CELL_COST < reserve) break
-    const [q, r] = key.split(',').map(Number)
-    const res = handleTap(q, r, 'leaf', game, p)
-    if (res.kind === 'placed') p = res.planning!
-  }
-  return p
-}
-
 function touchesRealTree(q: number, r: number, game: GameState): boolean {
   for (const [dq, dr] of HEX_NEIGHBORS) {
     if (game.cells.get(hexKey(q + dq, r + dr))?.type === 'tree') return true
@@ -388,32 +331,16 @@ function touchesRealTree(q: number, r: number, game: GameState): boolean {
 
 const SEASONS: Season[] = ['spring', 'summer', 'fall', 'winter']
 
-// The leaves a fall plan will actually shed: still real leaves, not overridden by a
-// staged cell. Passed into the simulation, which resolves shedding at SEASON END
-// (after the leaves have photosynthesized all season) — see resolveShedding in
-// simulate.ts. Shedding early in the planning phase used to drop the leaves before
-// the season ran, forfeiting that season's energy and starving the tree.
-export function resolvableShedKeys(game: GameState, planning: PlanningState): Set<string> {
-  const keys = new Set<string>()
-  for (const key of planning.shedMarked) {
-    if (!planning.stagedCells.has(key) && game.cells.get(key)?.type === 'leaf') keys.add(key)
-  }
-  return keys
-}
-
 export function applySeasonAdvance(game: GameState, planning: PlanningState): GameState {
   const newCells = new Map(game.cells)
 
   // Net energy cost of the plan: placements (flowers cost more) + prune wound-sealing.
-  // (Shedding no longer refunds here — its resorption happens at season end, feeding
-  // next season's budget.)
   let stagedTotal = 0
   for (const cell of planning.stagedCells.values()) stagedTotal += stagedCost(cell)
   const netCost = stagedTotal + planning.pruneCostAccrued
 
   // The payers: pre-existing living cells that survive the plan (not replaced by a
-  // staged cell). New cells' starting energy is part of the cost. Shed-marked leaves
-  // are still alive going into the simulation, so they pay their share too.
+  // staged cell). New cells' starting energy is part of the cost.
   const payerKeys: string[] = []
   let payerEnergy = 0
   for (const [key, cell] of game.cells) {

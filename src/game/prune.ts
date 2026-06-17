@@ -18,6 +18,41 @@ export function computeRemovalSet(cells: Map<string, Cell>, targetKey: string): 
   return applyBreakage(cells, new Set([targetKey]))
 }
 
+// Bulk prune (speed-pruning, playtest request): the full set removed when ALL of
+// `selection` is cut at once — the selected cells plus everything that loses root
+// connectivity. Computed in one breakage pass so the preview matches what a confirm
+// does. Keys not present in `cells` are ignored. Pure.
+export function computeMultiRemoval(cells: Map<string, Cell>, selection: Set<string>): Set<string> {
+  const present = new Set<string>()
+  for (const k of selection) if (cells.has(k)) present.add(k)
+  if (present.size === 0) return new Set<string>()
+  return applyBreakage(cells, present)
+}
+
+// Energy cost to bulk-prune: the wound-sealing cost of each EXPLICITLY selected cell
+// (collaterally-disconnected cells aren't charged, matching the single-cell rule).
+export function pruneSelectionCost(cells: Map<string, Cell>, selection: Set<string>): number {
+  let cost = 0
+  for (const k of selection) {
+    const c = cells.get(k)
+    if (c) cost += pruneCost(c)
+  }
+  return cost
+}
+
+// True if the removal would wipe out the ENTIRE living tree (every living cell, roots
+// included) — which must be blocked: a tree can't prune itself out of existence (use
+// "Plant a new seed" to start over). Guards the single-cell / whole-tree case.
+export function removesEntireTree(cells: Map<string, Cell>, removed: Set<string>): boolean {
+  let living = 0, livingRemoved = 0
+  for (const [key, cell] of cells) {
+    if (cell.type === 'soil' || cell.type === 'rock' || cell.type === 'deadwood') continue
+    living++
+    if (removed.has(key)) livingRemoved++
+  }
+  return living > 0 && livingRemoved === living
+}
+
 // Pruning a healthy cell costs energy (wound sealing); pruning dead/dying/rotted
 // wood is free counterplay.
 export const PRUNE_COST = 2

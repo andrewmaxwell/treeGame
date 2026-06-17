@@ -4,7 +4,7 @@
 
 import { createInitialState, type GameState } from '../game/state'
 import {
-  createPlanningState, handleTap, applySeasonAdvance, resolvableShedKeys,
+  createPlanningState, handleTap, applySeasonAdvance,
   bankedEnergy, getValidPlacements, canPlaceFlower, SPRING_VIGOR,
   type PlanningState, type PlacementMode,
 } from '../game/planning'
@@ -84,16 +84,6 @@ export class Headless {
     return placed
   }
 
-  shedAllLeaves(): number {
-    let n = 0
-    for (const [key, c] of this.game.cells) {
-      if (c.type !== 'leaf') continue
-      const res = handleTap(c.q, c.r, 'leaf', this.game, this.planning)
-      if (res.kind === 'shed_toggled') { this.planning = res.planning!; n++; void key }
-    }
-    return n
-  }
-
   prune(q: number, r: number): boolean {
     const key = hexKey(q, r)
     if (!this.game.cells.has(key)) return false
@@ -109,15 +99,14 @@ export class Headless {
   advance(): AdvanceReport {
     const cur = this.game
     const weather = generateWeather(cur.season, cur.year, cur.worldSeed)
-    const shedKeys = resolvableShedKeys(cur, this.planning)
-    const shedThisTurn = shedKeys.size > 0
+    const shedThisTurn = cur.season === 'fall'  // canopy auto-drops at fall's end
 
     const bankedBefore = bankedEnergy(cur.cells)
     const cellsBefore = this.livingCount()
 
     const committed = applySeasonAdvance(cur, this.planning)
     const rng = mulberry32(committed.rngSeed)
-    const { frames, storms } = runSeason(committed, rng, weather, shedKeys)
+    const { frames, storms } = runSeason(committed, rng, weather)
     const final = frames[frames.length - 1]
 
     const nextSeed = Math.floor(mulberry32(final.rngSeed)() * 0xffffffff)

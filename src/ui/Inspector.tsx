@@ -10,6 +10,7 @@ interface Props {
   cost: number           // energy cost to prune (0 if dead/dying/rotted)
   affordable: boolean
   seversCanopy: boolean  // pruning would cut the whole canopy from the roots
+  removesAll: boolean    // pruning would wipe out the whole tree → blocked
   stress?: number        // structural stress (load/strength) for wood cells; else undefined
   onPrune: () => void
   onClose: () => void
@@ -49,7 +50,7 @@ function status(cell: Cell): { text: string; tone: 'good' | 'warn' | 'bad' } {
   return { text: 'Recovering', tone: 'warn' }
 }
 
-export function Inspector({ cell, removalCount, cost, affordable, seversCanopy, stress, onPrune, onClose }: Props) {
+export function Inspector({ cell, removalCount, cost, affordable, seversCanopy, removesAll, stress, onPrune, onClose }: Props) {
   // Two-step confirm only when severing the whole canopy.
   const [confirming, setConfirming] = useState(false)
   useEffect(() => { setConfirming(false) }, [cell])
@@ -59,7 +60,7 @@ export function Inspector({ cell, removalCount, cost, affordable, seversCanopy, 
   const st = status(cell)
 
   const typeName = cell.type === 'tree' ? woodLabel(cell) : TYPE_LABEL[cell.type]
-  const canPrune = !isTerrain && (cost === 0 || affordable)
+  const canPrune = !isTerrain && !removesAll && (cost === 0 || affordable)
 
   const pruneLabel = removalCount > 1
     ? `Prune — ${removalCount} cells removed`
@@ -101,6 +102,9 @@ export function Inspector({ cell, removalCount, cost, affordable, seversCanopy, 
 
       {!isTerrain && (
         <>
+          {removesAll && (
+            <div className={styles.warnLine}>This is your whole tree — prune something smaller, or "Plant a new seed" to start over.</div>
+          )}
           {seversCanopy && confirming && (
             <div className={styles.warnLine}>This removes your whole canopy. Tap again to confirm.</div>
           )}
@@ -108,7 +112,7 @@ export function Inspector({ cell, removalCount, cost, affordable, seversCanopy, 
             className={`${styles.prune} ${confirming ? styles.pruneDanger : ''}`}
             onClick={handlePrune}
             disabled={!canPrune}
-            title={!canPrune ? 'Not enough energy to seal the wound' : undefined}
+            title={removesAll ? "Can't prune your whole tree" : !canPrune ? 'Not enough energy to seal the wound' : undefined}
           >
             {confirming ? 'Confirm prune' : pruneLabel}
             {cost > 0 && <span className={styles.cost}>⚡{cost}</span>}

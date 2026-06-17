@@ -2,7 +2,10 @@ import { hexToPixel, hexKey, HEX_NEIGHBORS } from '../sim/grid'
 import type { Cell } from '../sim/cells'
 import { surfaceR, type TerrainGen } from '../sim/terrain'
 import { worldToScreen, type Camera } from './camera'
-import { cellColor } from './colors'
+import { cellColor, overlayColor, type ResourceOverlay } from './colors'
+import { CELL_WATER_CAP, CELL_ENERGY_CAP, SOIL_WATER_CAP } from '../sim/cells'
+
+const OVERLAY_LIVING: ReadonlySet<Cell['type']> = new Set<Cell['type']>(['tree', 'leaf', 'flower', 'fruit'])
 
 export const BASE_RADIUS = 14  // world pixels per hex at zoom=1
 
@@ -23,10 +26,12 @@ export function drawScene(
   cells: Map<string, Cell>,
   terrain: TerrainGen,
   stagedCells: Map<string, Cell>,
-  shedMarked: Set<string>,
-  validPlacements: Map<string, 'tree' | 'leaf' | 'flower'>,
+  // Hexes where the canopy will auto-grow leaves this season (planning preview), shown as
+  // faint ghost leaves so the player sees the prospective canopy as they shape wood.
+  leafPreview: Set<string>,
+  validPlacements: Map<string, 'tree' | 'flower'>,
   // Light level (0–1) per leaf cell key — drives the per-leaf sun indicator during
-  // planning. Empty during playback. Includes staged leaves (prospective shading).
+  // planning on the tree's existing leaves. Empty during playback.
   leafLight: Map<string, number>,
   // The inspected cell (white outline) and the set of cells a pending prune would
   // remove (red danger overlay). Both empty/null outside the inspector.
@@ -35,6 +40,8 @@ export function drawScene(
   // Per wood-cell stress (load/strength). Cells over STRESS_WARN get a red tint — a
   // standing early warning and a live preview of staged growth's structural cost.
   stress: Map<string, number>,
+  // Resource-flow overlay: recolour cells by water/energy fullness when not 'none'.
+  overlay: ResourceOverlay,
 ): void {
   ctx.clearRect(0, 0, width, height)
   ctx.fillStyle = '#1a1a2e'
@@ -72,24 +79,23 @@ export function drawScene(
       if (gameCell) {
         // Soil/rock in game.cells came from simulation — render like terrain
         if (gameCell.type === 'soil' || gameCell.type === 'rock') {
-          drawFilledHex(ctx, sx, sy, r, cellColor(gameCell), 'rgba(0,0,0,0.3)', 0.5)
+          drawFilledHex(ctx, sx, sy, r, terrainFill(gameCell, overlay), 'rgba(0,0,0,0.3)', 0.5)
         } else {
           treeCells.push({ cell: gameCell, sx, sy })
         }
         continue
       }
-      drawFilledHex(ctx, sx, sy, r, cellColor(cell), 'rgba(0,0,0,0.3)', 0.5)
+      drawFilledHex(ctx, sx, sy, r, terrainFill(cell, overlay), 'rgba(0,0,0,0.3)', 0.5)
     }
   }
 
   // ── Pass 2: real game cells ────────────────────────────────────────────────
   for (const { cell, sx, sy } of treeCells) {
     const key = hexKey(cell.q, cell.r)
-    const isShedMarked = shedMarked.has(key)
-    if (isShedMarked) {
-      // Draw wilting yellow tint
-      drawFilledHex(ctx, sx, sy, r, '#C8A020', 'rgba(0,0,0,0.3)', 0.5)
-      drawShedX(ctx, sx, sy, r)
+    if (overlay !== 'none' && OVERLAY_LIVING.has(cell.type)) {
+      // Resource view: recolour by fullness; suppress stress/sun glyphs to keep it clean.
+      const level = overlay === 'water' ? cell.water / CELL_WATER_CAP : cell.energy / CELL_ENERGY_CAP
+      drawFilledHex(ctx, sx, sy, r, overlayColor(level, overlay), 'rgba(255,255,255,0.55)', 1.5)
     } else {
       drawFilledHex(ctx, sx, sy, r, cellColor(cell), 'rgba(255,255,255,0.55)', 1.5)
       drawStressTint(ctx, sx, sy, r, stress.get(key))
@@ -97,6 +103,17 @@ export function drawScene(
         drawLeafSun(ctx, sx, sy, r, leafLight.get(key)!)
       }
     }
+  }
+
+  // ── Pass 2b: auto-leaf preview — faint ghost leaves where the canopy will grow ──
+  if (leafPreview.size > 0 && overlay === 'none') {
+    ctx.save()
+    ctx.globalAlpha = 0.4
+    for (const key of leafPreview) {
+      const p = screenPosForKey(key, camera, width, height)
+      if (p) drawFilledHex(ctx, p.sx, p.sy, r, '#4CAF50', 'rgba(120,200,120,0.5)', 1)
+    }
+    ctx.restore()
   }
 
   // ── Pass 3: valid placement highlights ────────────────────────────────────
@@ -110,14 +127,12 @@ export function drawScene(
       if (sx < -r * 2 || sx > width + r * 2 || sy < -r * 2 || sy > height + r * 2) continue
       // Underground wood placements are ROOT spots — over tan soil the faint above-ground
       // hint vanishes, so give roots a higher-contrast warm outline + fill so players see
-      // they can dig down. Leaf/flower/above-ground wood keep the subtle dotted hint.
+      // they can dig down. Flower / above-ground wood keep the subtle dotted hint.
       const underground = vpType === 'tree' && vr >= surfaceR(vq)
-      const stroke = vpType === 'leaf' ? 'rgba(120,200,120,0.22)'
-        : vpType === 'flower' ? 'rgba(255,170,176,0.40)'
+      const stroke = vpType === 'flower' ? 'rgba(255,170,176,0.40)'
         : underground ? 'rgba(255,212,150,0.7)' : 'rgba(190,150,100,0.20)'
       hexPath(ctx, sx, sy, r * 0.92)
-      ctx.fillStyle = vpType === 'leaf' ? 'rgba(76,175,80,0.04)'
-        : vpType === 'flower' ? 'rgba(255,170,176,0.08)'
+      ctx.fillStyle = vpType === 'flower' ? 'rgba(255,170,176,0.08)'
         : underground ? 'rgba(110,70,30,0.30)' : 'rgba(160,115,65,0.04)'
       ctx.fill()
       ctx.strokeStyle = stroke
@@ -197,6 +212,70 @@ export function drawScene(
       ctx.stroke()
     }
   }
+
+  // ── Pass 6: altitude ruler ──────────────────────────────────────────────────
+  drawDepthRuler(ctx, width, height, camera, worldTop, worldBottom)
+}
+
+// A subtle left-edge gutter marking height above / depth below the surface every 10
+// cells, so the player can read "depth 18 water table" or "10 cells tall" without
+// counting (playtest request). Pinned to the screen's left edge (fixed x), world-mapped
+// in y so the marks scroll with the camera. Drawn last, faint, to avoid adding noise.
+const RULER_STEP = 10
+function drawDepthRuler(
+  ctx: CanvasRenderingContext2D,
+  width: number, height: number,
+  camera: Camera,
+  worldTop: number, worldBottom: number,
+): void {
+  const hexRowH = BASE_RADIUS * 1.5
+  const baseR = surfaceR(0)  // nominal surface row at the spawn column
+  const rTop = Math.floor(worldTop / hexRowH)
+  const rBot = Math.ceil(worldBottom / hexRowH)
+
+  // First multiple-of-RULER_STEP offset from the surface at or above the top of view.
+  const kStart = Math.ceil((rTop - baseR) / RULER_STEP)
+  const kEnd = Math.floor((rBot - baseR) / RULER_STEP)
+
+  ctx.save()
+  ctx.font = '10px system-ui, sans-serif'
+  ctx.textBaseline = 'middle'
+
+  for (let k = kStart; k <= kEnd; k++) {
+    const offset = k * RULER_STEP            // +offset = cells below surface (depth)
+    const rv = baseR + offset
+    const wy = hexRowH * rv
+    const sy = (wy - camera.y) * camera.zoom + height / 2
+    if (sy < 0 || sy > height) continue
+
+    if (offset === 0) {
+      // Surface line — the key reference; a touch more visible, drawn full-width.
+      ctx.strokeStyle = 'rgba(150,205,150,0.22)'
+      ctx.lineWidth = 1
+      ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(width, sy); ctx.stroke()
+      ctx.fillStyle = 'rgba(170,220,170,0.7)'
+      ctx.fillText('ground', 16, sy - 7)
+    } else {
+      // Height (above) / depth (below) tick in the gutter only.
+      ctx.strokeStyle = 'rgba(255,255,255,0.22)'
+      ctx.lineWidth = 1
+      ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(11, sy); ctx.stroke()
+      ctx.fillStyle = 'rgba(255,255,255,0.4)'
+      const label = offset > 0 ? `${offset}↓` : `${-offset}↑`
+      ctx.fillText(label, 16, sy)
+    }
+  }
+  ctx.restore()
+}
+
+// Soil/rock fill — under the water overlay, soil shows its moisture on the same cyan
+// ramp as the tree (so the soil-water field and root uptake read together); rock and the
+// energy overlay fall back to the normal terrain colour.
+function terrainFill(cell: Cell, overlay: ResourceOverlay): string {
+  if (overlay === 'water' && cell.type === 'soil') {
+    return overlayColor(cell.water / SOIL_WATER_CAP, 'water')
+  }
+  return cellColor(cell)
 }
 
 // Parse a "q,r" cell key to its on-screen center, or null if off-screen.
@@ -260,19 +339,6 @@ function drawStressTint(ctx: CanvasRenderingContext2D, cx: number, cy: number, r
   hexPath(ctx, cx, cy, r)
   ctx.fillStyle = `rgba(220,40,40,${alpha})`
   ctx.fill()
-  ctx.restore()
-}
-
-function drawShedX(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number): void {
-  const s = r * 0.35
-  ctx.save()
-  ctx.strokeStyle = 'rgba(255,255,255,0.9)'
-  ctx.lineWidth = Math.max(1, r * 0.12)
-  ctx.lineCap = 'round'
-  ctx.beginPath()
-  ctx.moveTo(cx - s, cy - s); ctx.lineTo(cx + s, cy + s)
-  ctx.moveTo(cx + s, cy - s); ctx.lineTo(cx - s, cy + s)
-  ctx.stroke()
   ctx.restore()
 }
 
