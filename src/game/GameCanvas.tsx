@@ -180,6 +180,7 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
           dirtyRef.current = true;
         },
       }),
+      // eslint-disable-next-line react-hooks/exhaustive-deps
       [],
     );
 
@@ -366,7 +367,7 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
       pan.lastY = e.clientY;
 
       dirtyRef.current = true;
-    }, []);
+    }, [buildAtScreenPos]);
 
     const onMouseUp = useCallback(
       (e: React.MouseEvent) => {
