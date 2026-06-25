@@ -42,8 +42,13 @@
   font-size: 13.5px;
   line-height: 1.5;
 }
-.steps li { margin-bottom: 7px; }
-.steps b { color: #ffd24a; font-weight: 700; }
+.steps li {
+  margin-bottom: 7px;
+}
+.steps b {
+  color: #ffd24a;
+  font-weight: 700;
+}
 
 .tip {
   margin: 0 0 18px;
@@ -54,7 +59,9 @@
   padding: 8px 12px;
   border-radius: 8px;
 }
-.tip b { color: #ff8a8a; }
+.tip b {
+  color: #ff8a8a;
+}
 
 .btn {
   display: block;
@@ -69,4 +76,6 @@
   border-radius: 8px;
   cursor: pointer;
 }
-.btn:hover { background: #3a9f4c; }
+.btn:hover {
+  background: #3a9f4c;
+}

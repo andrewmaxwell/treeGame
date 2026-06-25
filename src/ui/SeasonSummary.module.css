@@ -51,7 +51,7 @@
 }
 
 .events li::before {
-  content: '•';
+  content: "•";
   position: absolute;
   left: 2px;
   color: #6aa9e0;
@@ -88,9 +88,15 @@
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-.good    { color: #7bb36a; }   /* a gain — green */
-.bad     { color: #e08a6a; }   /* a loss — warm red */
-.neutral { color: rgba(255, 255, 255, 0.4); }
+.good {
+  color: #7bb36a;
+} /* a gain — green */
+.bad {
+  color: #e08a6a;
+} /* a loss — warm red */
+.neutral {
+  color: rgba(255, 255, 255, 0.4);
+}
 
 .dismiss {
   display: block;
@@ -107,4 +113,6 @@
   transition: background 0.15s;
 }
 
-.dismiss:hover { background: #3a9f4c; }
+.dismiss:hover {
+  background: #3a9f4c;
+}

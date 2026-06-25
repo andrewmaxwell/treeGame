@@ -23,7 +23,9 @@
   gap: 8px;
   padding-bottom: 0;
 }
-.bottomGroup > div:not(.bottomBar) { margin: 0 12px; }
+.bottomGroup > div:not(.bottomBar) {
+  margin: 0 12px;
+}
 
 /* ── Top bar ─────────────────────────────────────────────────────────────── */
 .topBar {
@@ -46,9 +48,19 @@
   align-items: center;
 }
 
-.seasonBlock { display: flex; flex-direction: column; line-height: 1.25; }
-.season { font-weight: 600; letter-spacing: 0.02em; }
-.months { font-size: 11px; color: rgba(255, 255, 255, 0.5); }
+.seasonBlock {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+.season {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.months {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+}
 
 /* Row 2: current weather → next season, overlay toggles pushed right */
 .weatherRow {
@@ -59,8 +71,18 @@
   min-width: 0;
 }
 
-.weatherNow  { font-size: 13px; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
-.weatherSep  { font-size: 11px; color: rgba(255, 255, 255, 0.45); white-space: nowrap; flex-shrink: 0; }
+.weatherNow {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.weatherSep {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
 .weatherNext {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.82);
@@ -70,10 +92,19 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.weatherNext b { color: #ffe9a8; font-weight: 700; }
+.weatherNext b {
+  color: #ffe9a8;
+  font-weight: 700;
+}
 
-.rightBlock { display: flex; align-items: center; gap: 8px; }
-.score  { font-size: 16px; }
+.rightBlock {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.score {
+  font-size: 16px;
+}
 
 /* ── Resource-flow overlay toggle ─────────────────────────────────────────── */
 .overlayToggle {
@@ -92,10 +123,16 @@
   cursor: pointer;
   filter: grayscale(0.5);
   opacity: 0.7;
-  transition: background 0.15s, opacity 0.15s, filter 0.15s;
+  transition:
+    background 0.15s,
+    opacity 0.15s,
+    filter 0.15s;
   pointer-events: auto;
 }
-.overlayBtn:hover { opacity: 1; filter: none; }
+.overlayBtn:hover {
+  opacity: 1;
+  filter: none;
+}
 .overlayBtnWater {
   background: rgba(70, 216, 255, 0.25);
   border-color: rgba(70, 216, 255, 0.7);
@@ -121,7 +158,9 @@
   cursor: pointer;
   pointer-events: auto;
 }
-.goalsBtn:hover { background: rgba(255, 255, 255, 0.2); }
+.goalsBtn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
 
 /* Small round icon buttons (help, new game) in the top-right. */
 .iconBtn {
@@ -141,7 +180,9 @@
   cursor: pointer;
   pointer-events: auto;
 }
-.iconBtn:hover { background: rgba(255, 255, 255, 0.22); }
+.iconBtn:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
 
 /* The ⟳ glyph sits small and slightly high in its em box; nudge it up in size and
    line-height so it reads centered and matched to the neighbouring "?" button. */
@@ -167,8 +208,12 @@
   cursor: pointer;
   pointer-events: auto;
 }
-.goalBar:hover { background: rgba(90, 78, 26, 0.8); }
-.goalIcon { margin-right: 4px; }
+.goalBar:hover {
+  background: rgba(90, 78, 26, 0.8);
+}
+.goalIcon {
+  margin-right: 4px;
+}
 
 /* ── Spring re-leaf hint ──────────────────────────────────────────────────── */
 .springHint {
@@ -187,7 +232,9 @@
   backdrop-filter: blur(4px);
   pointer-events: none;
 }
-.springHint b { color: #fff; }
+.springHint b {
+  color: #fff;
+}
 
 /* ── Fall reserve warning ─────────────────────────────────────────────────── */
 .reserveHint {
@@ -262,7 +309,7 @@
 
 .progressBar {
   height: 100%;
-  background: #4A90D9;
+  background: #4a90d9;
   transition: width 0.05s linear;
 }
 
@@ -294,18 +341,23 @@
   font-family: system-ui, sans-serif;
   font-size: 18px;
   font-weight: 700;
-  color: #FFD700;
+  color: #ffd700;
   min-width: 60px;
 }
 
 .energyLow {
-  color: #FF5555;
+  color: #ff5555;
   animation: pulse 1s infinite;
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.5; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 /* ── Playback state ──────────────────────────────────────────────────────── */
@@ -331,7 +383,9 @@
   transition: background 0.15s;
 }
 
-.skipBtn:hover { background: rgba(255, 255, 255, 0.25); }
+.skipBtn:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
 
 /* ── Mode toggle ─────────────────────────────────────────────────────────── */
 .modeToggle {
@@ -350,7 +404,9 @@
   color: rgba(255, 255, 255, 0.45);
   border: none;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .modeBtn:hover:not(.modeBtnActive) {
@@ -379,7 +435,9 @@
   cursor: pointer;
   transition: background 0.15s;
 }
-.pruneToggleBtn:hover { background: rgba(200, 90, 70, 0.3); }
+.pruneToggleBtn:hover {
+  background: rgba(200, 90, 70, 0.3);
+}
 
 .pruneHint {
   font-family: system-ui, sans-serif;
@@ -400,7 +458,9 @@
   cursor: pointer;
   transition: background 0.15s;
 }
-.pruneCancelBtn:hover { background: rgba(255, 255, 255, 0.22); }
+.pruneCancelBtn:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
 
 .pruneConfirmBtn {
   margin-left: auto;
@@ -415,13 +475,17 @@
   cursor: pointer;
   transition: background 0.15s;
 }
-.pruneConfirmBtn:hover:not(:disabled) { background: #cc5638; }
+.pruneConfirmBtn:hover:not(:disabled) {
+  background: #cc5638;
+}
 .pruneConfirmBtn:disabled {
   background: rgba(255, 255, 255, 0.1);
   color: rgba(255, 255, 255, 0.3);
   cursor: not-allowed;
 }
-.pruneConfirmCost { font-weight: 800; }
+.pruneConfirmCost {
+  font-weight: 800;
+}
 
 /* ── Advance Season button ───────────────────────────────────────────────── */
 .advanceBtn {
@@ -438,7 +502,9 @@
   transition: background 0.15s;
 }
 
-.advanceBtn:hover:not(:disabled) { background: #3a9f4c; }
+.advanceBtn:hover:not(:disabled) {
+  background: #3a9f4c;
+}
 
 .advanceBtn:disabled {
   background: rgba(255, 255, 255, 0.1);
