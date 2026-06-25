@@ -377,12 +377,15 @@ the whole run. The seed spawns at the center surface.
 
 ### Soil depth and rocks
 - Soil extends 28–32 cells below the surface (randomized per run), then solid bedrock
-- Rock density by depth: 5–15 deep ≈ 10%, 15–25 deep ≈ 25%, below 25 ≈ 60%.
-  **Backlog:** playtesters found the step from 10% → 25% at depth 15 too abrupt ("rocks
-  become overbearing around 20 feet"). Replace the step function with a smooth continuous
-  curve (e.g. sigmoid) so density rises gradually and the player can always push a bit
-  deeper before hitting an impenetrable wall. Calibrate so the overall rock frequency is
-  unchanged — only the gradient changes.
+- Rock density by depth (`rockProbability` in `sim/terrain.ts`): <5 deep = 0%, 5–15 ≈ 10%,
+  15–25 ≈ 25%, 25–35 ≈ 35%, below 35 ≈ 45%.
+  **Backlog (partially addressed):** playtesters found the jump from 10% → 25% at depth 15
+  too abrupt ("rocks become overbearing around 20 feet"). The deep tiers were since softened
+  (an extra 25–35 band was added and the deepest density lowered 60% → 45%), but it is **still
+  a step function** — the requested fix is to replace it with a smooth continuous curve (e.g.
+  sigmoid) so density rises gradually and the player can always push a bit deeper before
+  hitting an impenetrable wall. Calibrate so the overall rock frequency is roughly unchanged —
+  only the gradient changes.
 - Rocks are scattered individual cells (occasionally small clumps), generated lazily
 
 ### Soil moisture
@@ -877,11 +880,13 @@ feeds into that answer.
 
 ## Known UX gaps (backlog — from playtest feedback, not yet built)
 
-- **Drag-to-stage (high priority).** Holding Shift and dragging the mouse/finger should
-  stage every valid cell the cursor passes over, in one continuous gesture. Clicking cell by
-  cell to plan a long branch is painful — playtesters called it "death." The gesture should
-  share the same validity rules as tap-to-stage (connected to the tree, not rock, etc.) and
-  stop + give feedback (shake) on invalid cells without cancelling the whole drag.
+- **Drag-to-stage — desktop built, mobile pending.** Holding **Shift** and dragging the
+  mouse now stages every valid cell the cursor passes over in one gesture (`buildDragRef` in
+  `game/GameCanvas.tsx`, shares the tap-to-stage validity rules via a `visited` set). This
+  cured the "clicking cell by cell is death" complaint on desktop. **Still missing: the touch
+  equivalent** — a long-press-then-drag on mobile (the touch handlers only pan/pinch/tap;
+  there is no build-drag path). Add a long-press timer that flips a single-touch drag into
+  build mode so mobile gets the same one-gesture branch planting.
 - **Performance.** The simulation and Canvas renderer become noticeably heavy on large trees
   (playtesters report slowdown). Candidates: skip unchanged cells in the diffusion pass,
   dirty-rect Canvas redraws (only repaint cells that changed colour), throttle the light

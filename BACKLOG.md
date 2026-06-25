@@ -9,74 +9,33 @@ Sources: playtest feedback (brother, June 2026) + the "Known UX gaps" and
 
 ## Next up (agreed direction)
 
-- **Drag-to-stage** — Shift+drag (or long-press drag on mobile) stages every valid cell
-  the cursor passes over in one gesture. Clicking cell-by-cell to plan a long branch is
-  painful; playtesters called it "death." Same validity rules as tap-to-stage; stops +
-  shakes on invalid cells without cancelling the drag. Touches: `game/input.ts`,
-  `game/planning.ts`, `game/GameCanvas.tsx`.
-- **Diagnostic upgrades** — per-height band breakdown (water/health by altitude) + a
-  smarter verdict so the report stops saying "balanced" when a tree is actually dying.
+The near-term, non-duplicated priorities. The fuller wishlist (deferred cell types,
+environmental threats, etc.) lives in the numbered "Backlog (next)" and "Deferred features"
+sections below — items that previously appeared in both lists have been consolidated there,
+with real file paths, to stop the two lists drifting apart.
 
-- **Rock destruction** — _Value: Med · Effort: Low-Med_
-  Implement rock destruction requiring 20 energy per rock.
-  Touches: `game/actions.ts`, `terrain/rock management.ts`.
-
-- **Milestone rewards** — _Value: Med · Effort: Low-Med_
-  Add new cells as rewards for hitting milestones.
-  Touches: `game/milestones.ts`, `game/cell management.ts`.
-
-- **Horizontal growth limit** — _Value: Med · Effort: Low-Med_
-  Limit plant width horizontally, focusing on depth. Increment size per year/season.
-  Touches: `game/growth.ts`, `terrain/terrain generation.ts`.
-
-- **Infinite water stores** — _Value: High · Effort: Med-High_ — 🔨 **scaffolding in progress (branch `0.0.2`)**
-  Replace ground wetness with infinite water stores requiring creative root growth.
-  The `'ground water'` cell type exists and behaves as an infinite source in the sim
-  (`GROUND_WATER_CAP = 200` save-safe sentinel), but it spawns only at `depth >= 100`, so it
-  is **currently unreachable**. Meanwhile the old water-table regen was kept but heavily
-  nerfed (`0.1 → 0.01/tick`, cap halved) and marked `// TODO: Playtest`. Remaining work:
-  lower the spawn depth into reachable terrain and re-tune, then retire the water-table line.
-  See `CLAUDE.md` "In-Progress / Experimental Features".
-  Touches: `sim/terrain.ts`, `sim/simulate.ts`.
-
-- **Resource intensity optimization** — _Value: High · Effort: High_
-  Identify and optimize resource-intensive parts of the game.
-  Touches: `game/simulation.ts`, `game/performance analysis.ts`.
-
-- **Bird predation** — _Value: Med-High · Effort: Low-Med_
-  Implement bird predation for plants above 50ft, eating or moving leaves/branches.
-  Touches: `game/environmental factors.ts`, `game/plant interaction.ts`.
-
-- **Water reserve cells** — _Value: High · Effort: Low-Med_
-  Create cells storing up to 200+ water with no absorption capability.
-  Touches: `game/cell types.ts`, `terrain/water management.ts`.
-
-- **Energy reserve cells** — _Value: High · Effort: Low-Med_
-  Create cells storing up to 200+ energy with no photosynthesis capability.
-  Touches: `game/cell types.ts`, `game/energy management.ts`.
-
-- **Water/Energy+ reserve cells** — _Value: High · Effort: Low-Med_
-  Combine three water or energy reserve cells into one that doubles resource storage.
-  Touches: `game/cell interactions.ts`, `terrain/root growth.ts`.
-
-- **Straws** — _Value: High · Effort: Low-Med_
-  Implement straws to move water and energy more efficiently between points.
-  Touches: `game/cell types.ts`, `terrain/energy distribution.ts`.
-
-- **Re-enforced branches** — _Value: High · Effort: Low-Med_ — 🔨 **scaffolding in progress (branch `0.0.2`)**
-  Create reinforced branches that handle greater load stress, costing extra resources.
-  The `'reenforced wood'` cell type and all its sim plumbing exist (½ moment/stress,
-  0.075 water upkeep, no leaves/flowers by design), but it is **not placeable yet** — no
-  `PlacementMode`, cost, or HUD toggle creates one, so it's currently inert. Remaining work
-  is the placement path + cost. See `CLAUDE.md` "In-Progress / Experimental Features".
-  Touches: `game/planning.ts`, `ui/HUD.tsx`, `App.tsx`.
-
-- **Energy view improvements** — _Value: Med-High · Effort: Low-Med_
-  Improve the energy view button to highlight cells brightly and enhance visibility.
-  Touches: `render/renderer.ts`, `game/energy management.ts`.
-
-- **Auto-clear deadwood** (one-tap or automatic crumble) — further trims the late-game
-  prune chore your brother flagged.
+- **Finish the two `0.0.2` scaffolding features.** Both have full sim plumbing but are
+  unreachable in play (see `CLAUDE.md` "In-Progress / Experimental Features"):
+  - _Reinforced wood_ — add the **placement path**: a `PlacementMode`, an energy cost, and a
+    HUD toggle that stages a `'reenforced wood'` cell. The structure/upkeep/colour handlers
+    already exist (½ moment/stress, 0.075 water upkeep, no leaves/flowers by design); without
+    a placement path none of them ever fire. Touches: `game/planning.ts`, `ui/HUD.tsx`, `App.tsx`.
+  - _Ground water_ — lower `groundWaterProbability`'s spawn depth (currently `>= 100`, far
+    below the ~28–35-cell soil column, so a root can't reach it) into reachable terrain and
+    re-tune (it's an infinite source, `GROUND_WATER_CAP = 200` sentinel). Then retire the
+    nerfed water-table regen (`0.1 → 0.01/tick`, cap halved, marked `// TODO: Playtest`).
+    Touches: `sim/terrain.ts`, `sim/simulate.ts`.
+- **Drag-to-stage on mobile.** Desktop Shift+drag is **already built** (`buildDragRef` in
+  `game/GameCanvas.tsx`, shares tap-to-stage validity via a `visited` set). The touch
+  equivalent is not: add a long-press timer that flips a single-touch drag into build mode so
+  mobile gets the same one-gesture branch planting. Touches: `game/GameCanvas.tsx`.
+- **Diagnostic upgrades** — per-height band breakdown (water/health by altitude) + a smarter
+  verdict so the report stops saying "balanced" when a tree is actually dying.
+  Touches: `game/diagnose.ts`.
+- **Energy-view polish** — the ⚡ overlay should highlight cells more brightly / legibly.
+  Touches: `render/colors.ts`, `render/renderer.ts`. (See also numbered #11 playback animations.)
+- **Auto-clear deadwood** (one-tap or automatic crumble) — trims the late-game prune chore
+  your brother flagged. Pairs with the deferred Rot work (#23), which adds deadwood crumbling.
 
 ## Open question — height incentive / crawlers
 
@@ -95,26 +54,28 @@ keep the wall (current), add an artificial low-canopy penalty (hacky), or build 
    skip unchanged cells in the diffusion pass; dirty-rect Canvas redraws; throttle the
    light calculation to every N ticks during playback; replace hex-key string allocation
    (`"${q},${r}"`) with an integer key if it's a hot path.
-   Touches: `sim/simulate.ts`, `render/renderer.ts`, likely `sim/light.ts`.
+   Touches: `sim/simulate.ts` (light/water/energy passes all live here), `render/renderer.ts`.
 
 6. **Rock density gradient** — _Value: Med · Effort: Low_
-   The step from 10% → 25% at depth 15 feels abrupt ("rocks become overbearing around
-   20 feet"). Replace the step function with a smooth sigmoid so density rises gradually
-   and the player can always push a bit deeper before hitting a wall. Overall rock
-   frequency unchanged.
-   Touches: `sim/grid.ts` or terrain generation in `sim/simulate.ts`.
+   Partially addressed (deep tiers softened — see "Done → Rock gradient (partial)"), but
+   `rockProbability` is **still a step function** (0 / 0.1 / 0.25 / 0.35 / 0.45 by depth band).
+   Replace it with a smooth sigmoid so density rises gradually and the player can always push
+   a bit deeper before hitting a wall. Keep overall rock frequency roughly unchanged.
+   Touches: `sim/terrain.ts`.
 
 7. **Rock destruction** — _Value: Med · Effort: Low-Med_
    Spend 20 energy during planning to remove a rock cell, opening it for root growth.
    Steep enough to be a late-game tool (ruinous on a 20-energy tree, meaningful on a
    200-energy tree). Fits the existing planning/energy framework with no new systems.
-   Touches: `game/planning.ts`, `game/input.ts`, HUD cost preview.
+   Touches: `game/planning.ts`, `game/GameCanvas.tsx` (input), HUD cost preview.
 
 8. **Reinforced branch** — _Value: Med · Effort: Low_
-   A wood variant that costs 3 energy (vs 1) but has 2× strength in the structure
+   A wood variant that costs more energy (vs 1) but has 2× strength in the structure
    calculation — same moment, half the stress. Useful for fruiting cantilevers and
-   storm-exposed limbs. Simple extension of the existing structure model.
-   Touches: `sim/cells.ts`, `sim/structure.ts`, `game/planning.ts`, `render/colors.ts`.
+   storm-exposed limbs. **Most of this already exists** as the `'reenforced wood'` scaffolding
+   (see "Next up → Finish the two `0.0.2` scaffolding features"); the remaining work is the
+   placement path, not the structure model.
+   Touches: `game/planning.ts`, `ui/HUD.tsx`, `App.tsx`.
 
 9. **Replacement clarity** — _Value: Med · Effort: Med_
    Staging wood over an existing leaf is supported but just renders the staged cell at
@@ -183,7 +144,8 @@ keep the wall (current), add an artificial low-canopy penalty (hacky), or build 
     Drought buffer; cost 3–4 energy; initially one per tree (or milestone-unlocked).
     *Heartwood cache*: mirror for energy — banks 200+ energy, charged by diffusion, lets
     you save toward a big spring planting without hitting the cell-count storage cap.
-    Both need balance validation in the harness before shipping.
+    Both need balance validation in the harness before shipping. (Stretch idea: let three
+    reserve cells of a kind merge into one double-capacity cell, as a late-game upgrade.)
 
 20. **Conduit cell (straw)** — _Value: Med · Effort: Med_ _(pending clarification)_
     A woody cell with higher flow cap (≈5 units/tick vs 2) but near-zero storage (capacity
@@ -242,9 +204,12 @@ keep the wall (current), add an artificial low-canopy penalty (hacky), or build 
   pruning is now **free**; wound-sealing cost applies only to healthy wood. See `CLAUDE.md`
   "Pruning".
 
-- **Auto-build** — _Value: High · Effort: Low-Med_
-  Shift + click + drag to auto build everything under your mouse. Clicking one at a time is inefficient.
+- **Auto-build (desktop)** — ✅ Built: Shift + drag stages every valid cell under the cursor
+  in one gesture (`buildDragRef` in `game/GameCanvas.tsx`). **Mobile long-press drag is still
+  pending** — tracked under "Next up → Drag-to-stage on mobile" above.
 
-- **Rock gradient** — _Value: Med · Effort: Low-Med_
-  Around 20 feet, rocks become overbearing. Replace with a gradient for deeper growth.
-  Update included and additional depth condition and reducing the default probability
+- **Rock gradient (partial)** — ⚠️ Partially done: the deep tiers were softened (an extra
+  25–35 depth band added, deepest density lowered 60% → 45% in `rockProbability`,
+  `sim/terrain.ts`), which eases the "rocks overbearing around 20 feet" complaint. But it's
+  **still a step function**, not the smooth sigmoid the design calls for — the true gradient
+  fix remains open as numbered #6 "Rock density gradient" below.

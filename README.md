@@ -8,9 +8,9 @@ A season-based strategy game where you grow a 2D tree on a hex grid. Maximize re
 
 Each year cycles through four seasons:
 
-- **Spring** — plant flowers, grow new branches and leaves
+- **Spring** — grow new branches and roots, and bloom flowers; the canopy leafs out on its own
 - **Summer** — maximum photosynthesis, but water is scarce; fruit is thirsty
-- **Fall** — harvest seeds (your score), shed leaves to recover energy before frost
+- **Fall** — harvest seeds (your score); the canopy drops on its own, banking energy before frost
 - **Winter** — survive on reserves; ideal time to prune and reshape
 
 Place cells during the planning phase, then advance the season to watch the simulation play out.
