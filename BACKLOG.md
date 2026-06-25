@@ -24,9 +24,15 @@ Sources: playtest feedback (brother, June 2026) + the "Known UX gaps" and
   Limit plant width horizontally, focusing on depth. Increment size per year/season.
   Touches: `game/growth.ts`, `terrain/terrain generation.ts`.
 
-- **Infinite water stores** — _Value: High · Effort: Med-High_
+- **Infinite water stores** — _Value: High · Effort: Med-High_ — 🔨 **scaffolding in progress (branch `0.0.2`)**
   Replace ground wetness with infinite water stores requiring creative root growth.
-  Touches: `game/water management.ts`, `terrain/root growth.ts`.
+  The `'ground water'` cell type exists and behaves as an infinite source in the sim
+  (`GROUND_WATER_CAP = 200` save-safe sentinel), but it spawns only at `depth >= 100`, so it
+  is **currently unreachable**. Meanwhile the old water-table regen was kept but heavily
+  nerfed (`0.1 → 0.01/tick`, cap halved) and marked `// TODO: Playtest`. Remaining work:
+  lower the spawn depth into reachable terrain and re-tune, then retire the water-table line.
+  See `CLAUDE.md` "In-Progress / Experimental Features".
+  Touches: `sim/terrain.ts`, `sim/simulate.ts`.
 
 - **Resource intensity optimization** — _Value: High · Effort: High_
   Identify and optimize resource-intensive parts of the game.
@@ -52,9 +58,13 @@ Sources: playtest feedback (brother, June 2026) + the "Known UX gaps" and
   Implement straws to move water and energy more efficiently between points.
   Touches: `game/cell types.ts`, `terrain/energy distribution.ts`.
 
-- **Re-enforced branches** — _Value: High · Effort: Low-Med_
+- **Re-enforced branches** — _Value: High · Effort: Low-Med_ — 🔨 **scaffolding in progress (branch `0.0.2`)**
   Create reinforced branches that handle greater load stress, costing extra resources.
-  Touches: `game/cell types.ts`, `game/growth.ts`.
+  The `'reenforced wood'` cell type and all its sim plumbing exist (½ moment/stress,
+  0.075 water upkeep, no leaves/flowers by design), but it is **not placeable yet** — no
+  `PlacementMode`, cost, or HUD toggle creates one, so it's currently inert. Remaining work
+  is the placement path + cost. See `CLAUDE.md` "In-Progress / Experimental Features".
+  Touches: `game/planning.ts`, `ui/HUD.tsx`, `App.tsx`.
 
 - **Energy view improvements** — _Value: Med-High · Effort: Low-Med_
   Improve the energy view button to highlight cells brightly and enhance visibility.

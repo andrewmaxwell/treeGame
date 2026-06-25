@@ -21,8 +21,8 @@ interface Props {
 const STRESS_WARN = 0.8
 
 const TYPE_LABEL: Record<Cell['type'], string> = {
-  tree: 'Wood', leaf: 'Leaf', flower: 'Flower', fruit: 'Fruit',
-  deadwood: 'Deadwood', soil: 'Soil', rock: 'Rock',
+  tree: 'Wood', 'reenforced wood': 'Reinforced wood', leaf: 'Leaf', flower: 'Flower', fruit: 'Fruit',
+  deadwood: 'Deadwood', soil: 'Soil', rock: 'Rock', 'ground water': 'Ground water',
 }
 
 function woodLabel(cell: Cell): string {
@@ -56,7 +56,7 @@ export function Inspector({ cell, removalCount, cost, affordable, seversCanopy, 
   const [confirming, setConfirming] = useState(false)
   useEffect(() => { setConfirming(false) }, [cell])
 
-  const isTerrain = cell.type === 'soil' || cell.type === 'rock'
+  const isTerrain = cell.type === 'soil' || cell.type === 'rock' || cell.type === 'ground water'
   const waterCap = cell.type === 'soil' ? SOIL_WATER_CAP : CELL_WATER_CAP
   const st = status(cell)
 

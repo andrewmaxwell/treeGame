@@ -119,8 +119,10 @@ not from a named subtype. A tree cell below the ground surface behaves as a root
 | `'flower'` | Flower bud; spring only; terminal; becomes fruit if sustained |
 | `'fruit'` | Maturing fruit; terminal; +1 seed score if it survives to ripeness |
 | `'deadwood'` | Dead woody cell; still structural, minor capillary water flow |
+| `'reenforced wood'` | ⚠️ **Experimental, not yet player-usable** — stronger wood (½ moment/stress) but higher water upkeep and no leaves/flowers. See "In-Progress / Experimental Features". |
 | `'soil'` | Underground non-tree cell; holds moisture |
 | `'rock'` | Impenetrable; roots cannot pass through; no water flow |
+| `'ground water'` | ⚠️ **Experimental, currently unreachable** — infinite water source (`GROUND_WATER_CAP = 200` sentinel). See "In-Progress / Experimental Features". |
 | (absent) | Air — empty above-ground cells are simply not stored |
 
 **Terminal cells**: leaves, flowers, and fruit are terminal — no cell may be placed
@@ -886,6 +888,54 @@ feeds into that answer.
   initial camera now fits the loaded tree's bounding box (`makeCamera` in `GameCanvas`),
   but it does not re-frame as the tree grows during a run.
 - **Minimap** (corner overview once the tree exceeds ~1.5× viewport) — specified, not built.
+
+## In-Progress / Experimental Features (branch `0.0.2`, "Quality of Life Improvements")
+
+Two new `CellType`s were added on the `0.0.2` branch with most of their simulation
+plumbing in place, but **neither is reachable in actual play yet** — they are scaffolding
+for backlog items (BACKLOG.md "Re-enforced branches", "Infinite water stores" / "Water
+reserve cells"). Documented here so we don't mistake the handlers for working features.
+
+### `'reenforced wood'` — stronger wood (NOT yet placeable)
+- **Intent** (per the author): a wood variant that is structurally stronger but a worse
+  conduit — used for internal/base reinforcement. By design it does **not** grow leaves or
+  flowers (intentional, not a bug — confirmed in PR review).
+- **What's wired up:** treated as living wood by `isLivingWood` (water exchange, root
+  absorption, light occlusion, reachability/anchor checks), `structure.ts` halves its
+  `moment` and `stress`, water upkeep is **0.075/tick** (vs 0.05 for `'tree'`), it has its
+  own color (`#4e2b00`), and diagnose/inspector/HUD all account for it.
+- **What's MISSING (why it's inert):** there is **no placement path**. `PlacementMode` is
+  only `'branch' | 'flower'`, staging only ever creates `type: 'tree'`, and `stagedCost`
+  has no case for it. To make it real: add a placement mode + energy cost + HUD toggle that
+  stages a `'reenforced wood'` cell. Until then none of the above handlers ever fire in play.
+
+### `'ground water'` — infinite water source (currently UNREACHABLE)
+- **Intent:** a deep, effectively infinite water reservoir that rewards creative deep-root
+  growth (the "Infinite water stores" backlog item), replacing the passive water-table regen.
+- **What's wired up:** `GROUND_WATER_CAP = 200` is stored in the cell's `water` field as a
+  **sentinel** (NOT `Infinity` — `JSON.stringify(Infinity)` serializes to `null` and would
+  corrupt saves). In the sim it reads as an infinite source: `diffuseWater` overrides
+  `get`/`capacity`/`budget` for it, it never receives water (`recv.type === 'ground water'`
+  is skipped), and `absorbWater` lets an adjacent root fill to cap each tick without
+  depleting it. Root absorption, `buildWork` soil pre-expansion, and color all handle it.
+- **What's MISSING (why it's inert):** `groundWaterProbability` only returns non-zero at
+  `depth >= 100`, far below the ~28–35-cell soil column — a root can't reach it. To make it
+  real: lower the spawn depth into reachable terrain (and re-tune, since it's infinite).
+
+### Water-table reward — temporarily nerfed (`// TODO: Playtest`)
+The passive deep water-table regen in `updateSoil` was kept (it's the live deep-root reward,
+guarding Milestone 9 "Tap the deep water table") but **significantly weakened** pending the
+`'ground water'` replacement: regen rate **0.1 → 0.01/tick** and cap **`SOIL_WATER_CAP` →
+`SOIL_WATER_CAP / 2`** (20 → 10). At this rate a deep root drains its table cell faster than
+it refills, so the deep-root payoff is currently much smaller than the design intends. Marked
+`// TODO: Playtest` — re-tune (or finish `'ground water'` and remove this) before considering
+the deep-root reward "done".
+
+### Build note
+Adding these two `CellType`s requires updating every exhaustive `Record<CellType, …>` / switch.
+The `TYPE_LABEL` map in `ui/Inspector.tsx` was missed and broke `tsc` — fixed (both keys added,
+and `'ground water'` treated as terrain in the inspector). When adding a cell type, grep for
+`CellType` usages and check `npx tsc --noEmit` passes.
 
 ## Decisions Deferred (do not implement yet)
 
