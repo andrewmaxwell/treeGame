@@ -377,7 +377,12 @@ the whole run. The seed spawns at the center surface.
 
 ### Soil depth and rocks
 - Soil extends 28–32 cells below the surface (randomized per run), then solid bedrock
-- Rock density by depth: 5–15 deep ≈ 10%, 15–25 deep ≈ 25%, below 25 ≈ 60%
+- Rock density by depth: 5–15 deep ≈ 10%, 15–25 deep ≈ 25%, below 25 ≈ 60%.
+  **Backlog:** playtesters found the step from 10% → 25% at depth 15 too abrupt ("rocks
+  become overbearing around 20 feet"). Replace the step function with a smooth continuous
+  curve (e.g. sigmoid) so density rises gradually and the player can always push a bit
+  deeper before hitting an impenetrable wall. Calibrate so the overall rock frequency is
+  unchanged — only the gradient changes.
 - Rocks are scattered individual cells (occasionally small clumps), generated lazily
 
 ### Soil moisture
@@ -872,6 +877,16 @@ feeds into that answer.
 
 ## Known UX gaps (backlog — from playtest feedback, not yet built)
 
+- **Drag-to-stage (high priority).** Holding Shift and dragging the mouse/finger should
+  stage every valid cell the cursor passes over, in one continuous gesture. Clicking cell by
+  cell to plan a long branch is painful — playtesters called it "death." The gesture should
+  share the same validity rules as tap-to-stage (connected to the tree, not rock, etc.) and
+  stop + give feedback (shake) on invalid cells without cancelling the whole drag.
+- **Performance.** The simulation and Canvas renderer become noticeably heavy on large trees
+  (playtesters report slowdown). Candidates: skip unchanged cells in the diffusion pass,
+  dirty-rect Canvas redraws (only repaint cells that changed colour), throttle the light
+  calculation to every N ticks during playback, and profile whether hex-key string allocation
+  (`"${q},${r}"`) is a hot path worth replacing with an integer key.
 - **Soil-moisture "halo" artifact.** Only soil near the tree is simulated and *promoted*
   into `cells` (so its moisture persists); the rest renders at the static terrain default.
   Soil darkens with moisture, so the boundary shows as a darker/different patch tracing the
@@ -949,6 +964,59 @@ and `'ground water'` treated as terrain in the inspector). When adding a cell ty
   seeds, milestones, plain-language cause of death). Until built, death just restarts via
   "Plant a new seed."
 - **Hall of memorials** — the cross-run best-score / longest-life record.
+- **Rock destruction.** Let the player spend energy (suggested: 20 per rock cell) during
+  the planning phase to remove a rock cell, opening that hex for root growth. Gives agency
+  when the random rock layout blocks a critical path. Cost is deliberately steep so it's a
+  late-game tool (on a 20-energy tree it's ruinous; on a 200-energy tree it's a real
+  choice). Fits the existing planning/energy framework with no new systems.
+- **Milestone rewards.** Currently milestones are pure achievements. Consider a tangible
+  reward on completion — a one-time energy grant, a permanent upkeep discount, or unlocking
+  a new cell type. The flower unlock on "Reach 30 cells" is the existing precedent. Design
+  the reward to feel like the milestone "pays off" rather than just recording the
+  achievement, without making early milestones feel obligatory to min-max.
+- **Underground aquifer nodes.** An alternative/complement to the diffuse water table: place
+  discrete aquifer pockets underground (procedurally generated, visible as a different soil
+  colour) that regenerate water at a high rate (or are infinite). Finding and tapping one
+  with your roots is a navigational puzzle reward — roots must physically reach it, and the
+  rock density + random layout make paths non-trivial. More interesting than the current
+  uniform depth ≥ 18 water table, which is always reachable by just digging straight down.
+  Pairs well with rock destruction above. The existing water table can remain as a fallback
+  floor; aquifers are the high-value targets.
+- **Fauna: birds and canopy disturbance.** Trees that grow above a certain height (≈ 50 cells
+  above ground, roughly corresponding to the 50ft comment) attract birds. Birds can displace
+  leaves (removing them from a branch, resetting auto-leaf growth for a tick), eat a fruit
+  (maturity → 0, instant abort), or — rarely — snap a twig (small branch). Counterplay:
+  dense clusters of branches deter nesting; fruit near the trunk is safer. Thematically:
+  tall trees have wind, birds, and lightning risk; short trees stay under the radar. Enables
+  a Year 8+ difficulty layer without requiring rot or pests to be built first. Build after
+  leaf pests (the leaf displacement is mechanically similar).
+- **New cell types (all need balancing before build):**
+  - *Water reserve (cistern).* A specialised cell that holds 200+ water but cannot absorb
+    from soil or receive diffusion faster than a normal cell — it must be charged by the
+    tree's ordinary vascular flow. Acts as a drought buffer: a tree with a cistern near
+    the trunk can survive a short dry spell even if the roots run dry. Cost: higher than
+    wood (suggested 3–4 energy). Only one cistern should be placeable per tree initially
+    (or unlock after the "Tap the deep water table" milestone). Pair with the energy
+    reserve below.
+  - *Energy reserve (heartwood cache).* Mirror of the cistern for energy — stores 200+
+    energy, cannot photosynthesize, must be charged by ordinary energy diffusion. Lets a
+    player bank energy toward a big spring planting without losing it to the cell-count cap.
+    Same cost and unlock restrictions as the cistern.
+  - *Conduit (straw).* A woody cell specialised for conduction: higher flow cap than
+    ordinary wood (e.g. 5 units/tick vs 2) but no storage (water/energy capacity = 1), no
+    photosynthesis, no absorption. Lets a player build a "vascular highway" to a distant
+    canopy or deep root cluster without thickening the entire trunk. Cost: 2 energy (same as
+    wood) but the strategic value comes from routing, so placement matters. Needs
+    clarification on exact behaviour — see the message below.
+  - *Reinforced branch.* Costs more energy than wood (suggested: 3) but has 2× strength
+    in the structure calculation, meaning the same moment produces half the stress. Useful
+    for fruiting cantilevers or storm-exposed limbs. No change to water/energy flow.
+    Simple extension of the existing structure model.
+- **Horizontal growth limit with annual expansion.** Proposed: cap how far left/right the
+  player can place cells, expanding the allowed radius by a fixed amount each year or season.
+  Would focus early play on vertical depth and trunk structure before the canopy sprawls.
+  Needs design work — what does the boundary look like, how fast does it expand, does it
+  reset on new game — before building. See clarification message below.
 - Multiple soil types (clay, sand, loam)
 - Rain runoff across bumpy terrain
 - Day/night cycles

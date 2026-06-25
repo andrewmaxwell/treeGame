@@ -69,26 +69,30 @@ export function HUD({
     <div className={styles.hud}>
       {/* Top group — pinned to the top of the screen */}
       <div className={styles.topGroup}>
-      {/* Top bar */}
+      {/* Top bar — two rows on mobile */}
       <div className={styles.topBar}>
-        <div className={styles.seasonBlock}>
-          <span className={styles.season}>{SEASON_LABEL[season]}, Year {year}</span>
-          <span className={styles.months}>{forecast.monthRange} · {seasonHalf === 0 ? 'first half' : 'second half'}</span>
+        <div className={styles.topRow}>
+          <div className={styles.seasonBlock}>
+            <span className={styles.season}>{SEASON_LABEL[season]}, Year {year}</span>
+            <span className={styles.months}>{forecast.monthRange} · {seasonHalf === 0 ? 'first half' : 'second half'}</span>
+          </div>
+          <div className={styles.rightBlock}>
+            <span className={styles.score}>🌰 {score}</span>
+            <button className={styles.goalsBtn} onClick={onOpenGoals} title="Goals achieved">
+              🏅 {completedGoals}
+            </button>
+            <button className={styles.iconBtn} onClick={onHelp} title="How to play">?</button>
+            <button className={`${styles.iconBtn} ${styles.iconBtnReload}`} onClick={onNewGame} title="Plant a new seed (restart)">⟳</button>
+          </div>
         </div>
-        <div className={styles.weatherBlock}>
-          <span className={styles.weatherNow} title="This season">
-            {forecast.weatherIcon} {forecast.weatherLabel}
+        {/* Weather row — current + next in one line; overlay toggles pushed to the right */}
+        <div className={styles.weatherRow}
+          title={`Forecast: ${forecast.nextForecast}`}>
+          <span className={styles.weatherNow}>{forecast.weatherIcon} {forecast.weatherLabel}</span>
+          <span className={styles.weatherSep}>→ Next:</span>
+          <span className={styles.weatherNext}>
+            <b>{forecast.nextSeasonLabel}</b> · {forecast.nextSeasonMeaning}
           </span>
-          <span className={styles.weatherNext} title="Next season — what's coming and what it means for your tree">
-            → Next: <b>{forecast.nextSeasonLabel}</b> · {forecast.nextSeasonMeaning}
-          </span>
-          <span className={styles.weatherForecast} title="Next season's forecast">
-            {forecast.nextForecast}
-          </span>
-        </div>
-        <div className={styles.rightBlock}>
-          {/* Resource-flow view toggles — visible during planning AND playback so the
-              player can watch water climb and energy pool. Click the active one to turn off. */}
           <div className={styles.overlayToggle}>
             <button
               className={`${styles.overlayBtn} ${overlay === 'water' ? styles.overlayBtnWater : ''}`}
@@ -101,12 +105,6 @@ export function HUD({
               title="Energy view — see where sugar is made and where it pools"
             >⚡</button>
           </div>
-          <span className={styles.score}>🌰 {score}</span>
-          <button className={styles.goalsBtn} onClick={onOpenGoals} title="Goals achieved">
-            🏅 {completedGoals}
-          </button>
-          <button className={styles.iconBtn} onClick={onHelp} title="How to play">?</button>
-          <button className={`${styles.iconBtn} ${styles.iconBtnReload}`} onClick={onNewGame} title="Plant a new seed (restart)">⟳</button>
         </div>
       </div>
 

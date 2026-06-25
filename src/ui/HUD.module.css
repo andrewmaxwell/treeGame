@@ -28,9 +28,9 @@
 /* ── Top bar ─────────────────────────────────────────────────────────────── */
 .topBar {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 16px;
+  flex-direction: column;
+  gap: 0;
+  padding: 8px 14px 6px;
   background: rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(4px);
   color: #fff;
@@ -39,32 +39,48 @@
   pointer-events: auto;
 }
 
+/* Row 1: season label on the left, score + utility buttons on the right */
+.topRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
 .seasonBlock { display: flex; flex-direction: column; line-height: 1.25; }
 .season { font-weight: 600; letter-spacing: 0.02em; }
 .months { font-size: 11px; color: rgba(255, 255, 255, 0.5); }
 
-.weatherBlock {
+/* Row 2: current weather → next season, overlay toggles pushed right */
+.weatherRow {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  line-height: 1.3;
-  text-align: center;
-  flex: 1;
+  gap: 5px;
+  padding-top: 5px;
+  min-width: 0;
 }
-.weatherNow  { font-size: 14px; font-weight: 600; }
-/* The upcoming season needs to read clearly — playtesters found "Spring/Winter" alone
-   confusing, so this line is bumped up and the season name bolded. */
-.weatherNext { font-size: 12.5px; color: rgba(255, 255, 255, 0.82); }
-.weatherNext b { color: #ffe9a8; font-weight: 700; }
-.weatherForecast { font-size: 10.5px; color: rgba(255, 255, 255, 0.45); }
 
-.rightBlock { display: flex; align-items: center; gap: 10px; }
+.weatherNow  { font-size: 13px; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
+.weatherSep  { font-size: 11px; color: rgba(255, 255, 255, 0.45); white-space: nowrap; flex-shrink: 0; }
+.weatherNext {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.82);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.weatherNext b { color: #ffe9a8; font-weight: 700; }
+
+.rightBlock { display: flex; align-items: center; gap: 8px; }
 .score  { font-size: 16px; }
 
 /* ── Resource-flow overlay toggle ─────────────────────────────────────────── */
 .overlayToggle {
   display: flex;
   gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 .overlayBtn {
   font-size: 14px;
