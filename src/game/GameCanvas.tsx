@@ -346,28 +346,31 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
       [buildAtScreenPos],
     );
 
-    const onMouseMove = useCallback((e: React.MouseEvent) => {
-      if (buildDragRef.current.active) {
-        buildAtScreenPos(e.clientX, e.clientY);
-        return;
-      }
+    const onMouseMove = useCallback(
+      (e: React.MouseEvent) => {
+        if (buildDragRef.current.active) {
+          buildAtScreenPos(e.clientX, e.clientY);
+          return;
+        }
 
-      const pan = panRef.current;
-      if (!pan.dragging) return;
+        const pan = panRef.current;
+        if (!pan.dragging) return;
 
-      const dx = e.clientX - pan.lastX;
-      const dy = e.clientY - pan.lastY;
+        const dx = e.clientX - pan.lastX;
+        const dy = e.clientY - pan.lastY;
 
-      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) pan.moved = true;
+        if (Math.abs(dx) > 2 || Math.abs(dy) > 2) pan.moved = true;
 
-      cameraRef.current.x -= dx / cameraRef.current.zoom;
-      cameraRef.current.y -= dy / cameraRef.current.zoom;
+        cameraRef.current.x -= dx / cameraRef.current.zoom;
+        cameraRef.current.y -= dy / cameraRef.current.zoom;
 
-      pan.lastX = e.clientX;
-      pan.lastY = e.clientY;
+        pan.lastX = e.clientX;
+        pan.lastY = e.clientY;
 
-      dirtyRef.current = true;
-    }, [buildAtScreenPos]);
+        dirtyRef.current = true;
+      },
+      [buildAtScreenPos],
+    );
 
     const onMouseUp = useCallback(
       (e: React.MouseEvent) => {

@@ -33,7 +33,10 @@
   margin-bottom: 6px;
 }
 
-.title { font-size: 17px; font-weight: 700; }
+.title {
+  font-size: 17px;
+  font-weight: 700;
+}
 
 .close {
   background: none;
@@ -44,16 +47,24 @@
   cursor: pointer;
   padding: 0 4px;
 }
-.close:hover { color: #fff; }
+.close:hover {
+  color: #fff;
+}
 
 .status {
   font-size: 13px;
   font-weight: 600;
   margin-bottom: 10px;
 }
-.good { color: #7bd07b; }
-.warn { color: #e8c45a; }
-.bad  { color: #ff6b6b; }
+.good {
+  color: #7bd07b;
+}
+.warn {
+  color: #e8c45a;
+}
+.bad {
+  color: #ff6b6b;
+}
 
 .rows {
   display: flex;
@@ -69,8 +80,13 @@
   justify-content: space-between;
   font-size: 13px;
 }
-.rowLabel { color: rgba(255, 255, 255, 0.5); }
-.rowValue { font-weight: 600; font-variant-numeric: tabular-nums; }
+.rowLabel {
+  color: rgba(255, 255, 255, 0.5);
+}
+.rowValue {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
 
 .hint {
   margin: 2px 0 0;
@@ -102,13 +118,24 @@
   cursor: pointer;
   transition: background 0.15s;
 }
-.prune:hover:not(:disabled) { background: #9f4c4c; }
-.pruneDanger { background: #b23b3b; }
+.prune:hover:not(:disabled) {
+  background: #9f4c4c;
+}
+.pruneDanger {
+  background: #b23b3b;
+}
 .prune:disabled {
   background: rgba(255, 255, 255, 0.1);
   color: rgba(255, 255, 255, 0.3);
   cursor: not-allowed;
 }
 
-.cost { font-size: 12px; opacity: 0.9; }
-.free { font-size: 11px; opacity: 0.7; font-weight: 600; }
+.cost {
+  font-size: 12px;
+  opacity: 0.9;
+}
+.free {
+  font-size: 11px;
+  opacity: 0.7;
+  font-weight: 600;
+}

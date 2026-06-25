@@ -140,9 +140,9 @@ keep the wall (current), add an artificial low-canopy penalty (hacky), or build 
     Deferred."
 
 19. **New cell types: water reserve & energy reserve** — _Value: Med · Effort: Med_
-    *Cistern*: holds 200+ water, can't absorb from soil, must be charged by vascular flow.
+    _Cistern_: holds 200+ water, can't absorb from soil, must be charged by vascular flow.
     Drought buffer; cost 3–4 energy; initially one per tree (or milestone-unlocked).
-    *Heartwood cache*: mirror for energy — banks 200+ energy, charged by diffusion, lets
+    _Heartwood cache_: mirror for energy — banks 200+ energy, charged by diffusion, lets
     you save toward a big spring planting without hitting the cell-count storage cap.
     Both need balance validation in the harness before shipping. (Stretch idea: let three
     reserve cells of a kind merge into one double-capacity cell, as a late-game upgrade.)

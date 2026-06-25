@@ -26,7 +26,10 @@
   justify-content: space-between;
   margin-bottom: 14px;
 }
-.title { font-size: 19px; font-weight: 700; }
+.title {
+  font-size: 19px;
+  font-weight: 700;
+}
 .close {
   background: none;
   border: none;
@@ -35,7 +38,9 @@
   line-height: 1;
   cursor: pointer;
 }
-.close:hover { color: #fff; }
+.close:hover {
+  color: #fff;
+}
 
 .list {
   list-style: none;
@@ -54,8 +59,13 @@
   line-height: 1.35;
 }
 
-.done .text { color: rgba(255, 255, 255, 0.92); }
-.check { color: #7bd07b; font-weight: 700; }
+.done .text {
+  color: rgba(255, 255, 255, 0.92);
+}
+.check {
+  color: #7bd07b;
+  font-weight: 700;
+}
 
 .current {
   padding: 8px 10px;
@@ -63,10 +73,19 @@
   border: 1px solid rgba(230, 200, 90, 0.35);
   border-radius: 8px;
 }
-.current .text { color: #ffe9a8; font-weight: 600; }
+.current .text {
+  color: #ffe9a8;
+  font-weight: 600;
+}
 
-.locked .text { color: rgba(255, 255, 255, 0.35); font-style: italic; }
-.dot { width: 1.2em; text-align: center; }
+.locked .text {
+  color: rgba(255, 255, 255, 0.35);
+  font-style: italic;
+}
+.dot {
+  width: 1.2em;
+  text-align: center;
+}
 
 .empty {
   font-size: 13px;

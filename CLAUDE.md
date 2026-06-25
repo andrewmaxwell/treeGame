@@ -14,6 +14,7 @@ The player places cells during a planning phase, then advances the season to wat
 simulation play out. The game starts calm and gradually introduces new threats.
 
 **The core annual rhythm** (this is the heart of the game's fun — protect it):
+
 - **Spring**: plant flowers, grow new branches and leaves, recover from winter
 - **Summer**: maximum photosynthesis, but water stress; fruit is maturing and thirsty
 - **Fall**: harvest seeds (score!), shed leaves to recover energy before frost
@@ -77,20 +78,24 @@ runs are reproducible for debugging.
 ## Hex Grid
 
 ### Orientation
+
 **Pointy-top hexagons** with **axial coordinates (q, r)**.
 Never use offset coordinates — neighbor math is painful. Use axial throughout.
 
 Six neighbors of (q, r) in pointy-top axial:
+
 ```
 (q+1, r), (q-1, r), (q, r+1), (q, r-1), (q+1, r-1), (q-1, r+1)
 ```
 
 ### Storage
+
 Sparse map: `Map<string, Cell>` where key is `"${q},${r}"`. Only cells that exist
 are stored. The grid is conceptually infinite; the terrain generator produces soil/rock
 cells lazily as the player explores near them.
 
 ### Coordinate convention
+
 - **+r = downward** (roots grow in +r direction)
 - **-r = upward** (branches and trunk grow in -r direction)
 - **±q = left/right**
@@ -98,6 +103,7 @@ cells lazily as the player explores near them.
 - For "horizontal distance" calculations, use pixel-space x: `x = q + r/2`
 
 ### Rendering
+
 Default cell radius: 14px at 1× zoom. Cells are drawn as filled hexagons with a 1px
 gap between them. The Canvas viewport supports pan and zoom; on new growth, gently
 drift to keep the tree in frame unless the player has manually panned recently.
@@ -107,40 +113,42 @@ drift to keep the tree in frame unless the player has manually panned recently.
 ## Cell Model
 
 ### Cell types
+
 All woody cells — trunk, branch, twig, root, root tip — share one type: `'tree'`.
 Their appearance and behavior are emergent from position, connectivity, and clustering,
 not from a named subtype. A tree cell below the ground surface behaves as a root
 (absorbs water from adjacent soil); above ground it behaves as wood.
 
-| Type | Description |
-|------|-------------|
-| `'tree'` | Any living woody cell (trunk, branch, root — identical in data) |
-| `'leaf'` | Leaf cluster; photosynthesizes, transpires, terminal (nothing grows from it) |
-| `'flower'` | Flower bud; spring only; terminal; becomes fruit if sustained |
-| `'fruit'` | Maturing fruit; terminal; +1 seed score if it survives to ripeness |
-| `'deadwood'` | Dead woody cell; still structural, minor capillary water flow |
+| Type                | Description                                                                                                                                                            |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `'tree'`            | Any living woody cell (trunk, branch, root — identical in data)                                                                                                        |
+| `'leaf'`            | Leaf cluster; photosynthesizes, transpires, terminal (nothing grows from it)                                                                                           |
+| `'flower'`          | Flower bud; spring only; terminal; becomes fruit if sustained                                                                                                          |
+| `'fruit'`           | Maturing fruit; terminal; +1 seed score if it survives to ripeness                                                                                                     |
+| `'deadwood'`        | Dead woody cell; still structural, minor capillary water flow                                                                                                          |
 | `'reinforced wood'` | ⚠️ **Experimental, not yet player-usable** — stronger wood (½ moment/stress) but higher water upkeep and no leaves/flowers. See "In-Progress / Experimental Features". |
-| `'soil'` | Underground non-tree cell; holds moisture |
-| `'rock'` | Impenetrable; roots cannot pass through; no water flow |
-| `'ground water'` | ⚠️ **Experimental, currently unreachable** — infinite water source (`GROUND_WATER_CAP = 200` sentinel). See "In-Progress / Experimental Features". |
-| (absent) | Air — empty above-ground cells are simply not stored |
+| `'soil'`            | Underground non-tree cell; holds moisture                                                                                                                              |
+| `'rock'`            | Impenetrable; roots cannot pass through; no water flow                                                                                                                 |
+| `'ground water'`    | ⚠️ **Experimental, currently unreachable** — infinite water source (`GROUND_WATER_CAP = 200` sentinel). See "In-Progress / Experimental Features".                     |
+| (absent)            | Air — empty above-ground cells are simply not stored                                                                                                                   |
 
 **Terminal cells**: leaves, flowers, and fruit are terminal — no cell may be placed
 attached only to them. New growth must attach to a `'tree'` cell (staged or real).
 
 ### Cell data structure
+
 ```typescript
 interface Cell {
   q: number;
   r: number;
   type: CellType;
-  water: number;       // units, 0 to waterCapacity
-  energy: number;      // units, 0 to energyCapacity
-  health: number;      // 0.0–1.0
-  rot: number;         // 0.0–1.0; 0 for most cells
-  age: number;         // seasons alive
-  maturity?: number;   // fruit only: 0.0–1.0 ripeness; ≥1.0 ripens to a seed, ≤0 aborts
-  staged?: boolean;    // true during planning phase only
+  water: number; // units, 0 to waterCapacity
+  energy: number; // units, 0 to energyCapacity
+  health: number; // 0.0–1.0
+  rot: number; // 0.0–1.0; 0 for most cells
+  age: number; // seasons alive
+  maturity?: number; // fruit only: 0.0–1.0 ripeness; ≥1.0 ripens to a seed, ≤0 aborts
+  staged?: boolean; // true during planning phase only
 }
 ```
 
@@ -148,16 +156,18 @@ interface Cell {
 Health and rot are 0–1 proportions. Be consistent everywhere.
 
 ### Capacities and flow limits (per cell)
+
 - Water capacity: **10 units** (tree/leaf/flower/fruit); **20 units** (soil)
 - Energy capacity: **10 units** (tree/leaf/flower/fruit); soil holds no energy
 - **Total inflow cap: 2 units/tick. Total outflow cap: 2 units/tick** (each, for water
-  and energy separately). This cap is on the *sum across all neighbors*, and it is the
+  and energy separately). This cap is on the _sum across all neighbors_, and it is the
   entire reason trunk width matters: a 1-cell-wide trunk moves at most 2 units/tick
   upward; a 3-cell-wide trunk moves up to 6. Do not weaken this cap.
 - Deadwood: water flow capped at **0.3 units/tick** total (capillary action only);
   no energy flow; no metabolism.
 
 ### Energy storage between seasons
+
 The tree's banked energy = sum of energy across all living cells. Maximum storage is
 therefore emergent: `living_cell_count × 10`. A bigger tree banks more reserves. Energy
 generated beyond what the tree can hold is lost — a deliberate pressure to either grow
@@ -168,6 +178,7 @@ or flower rather than hoard.
 ## Simulation
 
 ### Tick structure
+
 One season = **60 simulation ticks**, played back at ~12 ticks/sec (≈5 seconds of
 animation, skippable).
 
@@ -205,12 +216,13 @@ canopy auto-grows (`growAutoLeaves`; see "Auto-leaves"). Then each tick, in orde
 10. **Event check** — storms, frost (only on designated event ticks)
 
 ### Light calculation
+
 - Sun rays are cast **per column** (per unique pixel-space x) from the top down
 - Ray angle (from vertical) varies by season:
   - Spring: 20°, Summer: 5°, Fall: 20°, Winter: 40°
 - Each tree/leaf/flower/fruit cell in a ray's path absorbs 35% of the remaining light
 - A leaf cell generates energy = `remaining_light × season_intensity × PHOTO_COEFF ×
-  heightLightFactor` per tick. **`PHOTO_COEFF` was retuned 0.12 → 0.24** (M9 playtest): at
+heightLightFactor` per tick. **`PHOTO_COEFF` was retuned 0.12 → 0.24** (M9 playtest): at
   0.12 a leaf shaded even modestly (most of a canopy self-shades at 35% absorption/cell)
   netted barely above its 0.02 upkeep, so a normal tree never banked the surplus that
   flowering needs and every run collapsed to a 0-energy, health-0.5 "zombie."
@@ -218,7 +230,7 @@ canopy auto-grows (`growAutoLeaves`; see "Auto-leaves"). Then each tick, in orde
   above the surface: `LIGHT_GROUND_FACTOR` (**0.22**) at ground level, ramping to 1.0 by
   `LIGHT_FULL_HEIGHT` (10) cells up. Without it, sprawling a flat mat along the surface (no
   self-shading — side-by-side leaves are in different sun-columns — every leaf in full sun,
-  short water paths) was a *dominant degenerate strategy*: the harness `groundCrawler`
+  short water paths) was a _dominant degenerate strategy_: the harness `groundCrawler`
   scored ~4× a normal tree and never died. The height factor converts that into the
   intended core trade-off — grow tall for light, but then you need trunk WIDTH to water the
   lifted canopy (the conduction cap). `LIGHT_GROUND_FACTOR` is calibrated against the harness
@@ -235,7 +247,9 @@ Practical effect: dense canopies self-shade; wide flat canopies outperform tall 
 ones in summer; the low winter sun makes everything nearly dormant.
 
 ### Water diffusion
+
 For every pair of adjacent cells that can exchange water:
+
 - `flow = (a.water - b.water) × DIFFUSE_RATE`, from higher to lower. **`DIFFUSE_RATE` was
   retuned 0.15 → 0.5** (M9 playtest, applies to water AND energy): at 0.15 conduction was
   gradient-RESISTANCE-limited, so any tree taller than ~6 rows starved its own canopy no
@@ -250,29 +264,32 @@ For every pair of adjacent cells that can exchange water:
   and pulls water up the tree — suction is emergent, no special-case code needed
 
 ### Root absorption
+
 Any underground `'tree'` cell adjacent to soil absorbs water from each adjacent soil
 cell at `soil.water × 0.05` per tick (subject to the cell's inflow cap). More adjacent
 soil = faster absorption, so thin exploratory root tendrils with lots of soil contact
 absorb well, and root tips are emergent rather than a special type.
 
 ### Energy diffusion
+
 Same formula and caps as water. Flows only among tree, leaf, flower, and fruit cells.
 
 ### Metabolic consumption per tick
-| Type | Water | Energy |
-|------|-------|--------|
-| Tree | 0.05 | 0.005 |
-| Leaf | 0.10 (transpiration) | 0.02 |
-| Flower | 0.15 | 0.10 |
-| Fruit | 0.20 | 0.05 |
-| Deadwood | 0 | 0 |
+
+| Type     | Water                | Energy |
+| -------- | -------------------- | ------ |
+| Tree     | 0.05                 | 0.005  |
+| Leaf     | 0.10 (transpiration) | 0.02   |
+| Flower   | 0.15                 | 0.10   |
+| Fruit    | 0.20                 | 0.05   |
+| Deadwood | 0                    | 0      |
 
 **Stomatal closure (M9 Round 4):** a water-stressed leaf/fruit throttles its transpiration —
 `water consumption × stomataFactor(cell.water)`, where `stomataFactor` is 1 at water ≥
 `STOMA_FULL` (2) and ramps to `STOMA_MIN` (0.15) as water → 0. As a canopy dries, its demand
 falls with its supply, so it **stabilises at low-but-alive water under drought** instead of
 transpiring itself to 0 and dropping. This gives a tall canopy a fighting chance in a dry
-spell (before it, deep roots were *not* an effective canopy-drought defence — the deep water
+spell (before it, deep roots were _not_ an effective canopy-drought defence — the deep water
 is consumed climbing the trunk and the water table itself depletes, so sustained drought
 gutted the canopy with no counterplay). Truly extreme sustained drought (soil genuinely
 empty) can still kill — counterplay is deep roots + not over-building height. `STOMA_FULL = 2`
@@ -286,9 +303,9 @@ leaf's own water — `gain × photoWaterFactor(cell.water)`, 1.0 at water ≥ `P
 (trunk width + roots, the conduction cap) the real ceiling on energy income: a canopy you
 can't water can't print energy, so you **can't out-build your hydraulics**. (This reverses the
 M9 Round 3 decision to keep carbon purely light-driven. That decision was made to protect
-*manual* recovering canopies that ran lowish on water; it's safe to couple now that the canopy
+_manual_ recovering canopies that ran lowish on water; it's safe to couple now that the canopy
 **auto-grows fresh and free each spring** — a small recovering tree's canopy sits near its
-roots and stays well-watered, so coupling throttles only genuinely *over-extended* canopies,
+roots and stays well-watered, so coupling throttles only genuinely _over-extended_ canopies,
 not recovery.) **Why it was needed:** with free auto-leaves, a purely light-driven canopy let
 a bone-dry over-built tree (273 cells, leaf water ~0.3) still bank ~900 energy with nothing to
 spend it on — energy stopped being scarce. Now over-building dries the canopy and craters its
@@ -302,16 +319,16 @@ Winter: all consumption × 0.35 (dormancy), but photosynthesis is near zero too.
 
 **M6 balance note**: tree (wood) energy upkeep was lowered from 0.03 to **0.015**, and
 winter dormancy deepened from ×0.5 to **×0.35**. At 0.03/×0.5 a small deciduous tree
-could not bank enough over summer to survive the fall+winter valley *and* re-leaf in
+could not bank enough over summer to survive the fall+winter valley _and_ re-leaf in
 spring — it collapsed to a permanent 0-energy "zombie" (alive but unable to ever
 afford a leaf again). Lower wood upkeep means structure is cheap to maintain and a
 healthy canopy yields a growing surplus year over year (guarded by `recovery.test.ts`).
 
 **M9 Round 3 balance note**: tree (wood) energy upkeep lowered again, 0.015 → **0.005**.
-This is safe *only because* wood health no longer depends on energy (see "Health update")
+This is safe _only because_ wood health no longer depends on energy (see "Health update")
 — upkeep now taxes only banked energy, never survival. At 0.015 the fall valley (full
 metabolism, canopy still up) drained a small tree's entire summer surplus every year, so a
-pruned or recovering tree could *sustain* a small canopy but never re-bank a fall-surviving
+pruned or recovering tree could _sustain_ a small canopy but never re-bank a fall-surviving
 reserve to grow past it — a subsistence trap (alive, adding only the spring-vigor floor's
 worth of cells per year, forever). At 0.005 a modest canopy banks a surplus that **snowballs**
 — a brutally-pruned stump genuinely recovers (validated in `cli/recover.ts`: from-seed
@@ -320,8 +337,10 @@ The lower upkeep made a ground-hugging sprawl cheap again, so it was re-paired w
 `LIGHT_GROUND_FACTOR` (0.40 → 0.22) to keep the crawler suppressed — see Light calculation.
 
 ### Health update
+
 Each tick, a cell's health moves toward a target at rate 0.01/tick. The target is
 **type-aware** (M9 Round 3 fix):
+
 - **Wood (`'tree'` — trunk AND roots): WATER-driven, and thirst NEVER kills it.** Target
   1.0 if water > 3 (`WOOD_WATER_OK`), else `WOOD_DRY_HEALTH` (**0.5**) — a dry floor, not 0.
   Wood dies **only** from rot, storms, or pruning; dry structural wood just idles dormant at
@@ -333,7 +352,7 @@ Each tick, a cell's health moves toward a target at rate 0.01/tick. The target i
   at `water ≤ 0.5` toward target 0.0 → deadwood. But a deciduous tree goes **bare every
   winter**, and with no canopy there is no transpiration to pull water up, so the upper
   structure of any sizeable tree inevitably dried to ~0 and the rule converted it to deadwood
-  **every single year** — a *size-punishing* death with no counterplay (taller tree = more
+  **every single year** — a _size-punishing_ death with no counterplay (taller tree = more
   upper wood shed each winter) and the source of the late-game "pile of dead wood to prune"
   chore. Real branches don't die over a normal dormant winter. Flooring at 0.5 keeps the real
   consequences (dry wood is visibly half-grey and can't anchor a flower, which needs > 0.6)
@@ -347,18 +366,19 @@ Each tick, a cell's health moves toward a target at rate 0.01/tick. The target i
   energy-starved roots, a water-starved canopy, and a starved middle. Both unrealistic ("why
   does my structural trunk need sugar?") and not fun — players cut down perfectly recoverable
   trees because the whole thing looked sick. Decoupling wood health from energy fixes it and
-  keeps the *good* spatial challenge: getting WATER up to a lifted canopy (trunk width vs
+  keeps the _good_ spatial challenge: getting WATER up to a lifted canopy (trunk width vs
   height).
 - **Leaf / flower / fruit (metabolically active terminals): need BOTH.** Target 1.0 if
   water > 3 AND energy > 2, 0.5 if exactly one holds, 0.0 if neither. Preserves the real
   challenges: watering a lifted canopy, and feeding a fruit out on a far limb.
-A cell whose health reaches 0 becomes `'deadwood'` (leaves/flowers/fruit instead
-simply drop — removed from the map). Slow decline and slow recovery are intentional:
-the player should see trouble coming and have time to react, and death should feel
-like a slow drama, not a popped balloon. (Guarded by `updateHealth` tests for both the
-water-driven-wood and both-needed-leaf cases.)
+  A cell whose health reaches 0 becomes `'deadwood'` (leaves/flowers/fruit instead
+  simply drop — removed from the map). Slow decline and slow recovery are intentional:
+  the player should see trouble coming and have time to react, and death should feel
+  like a slow drama, not a popped balloon. (Guarded by `updateHealth` tests for both the
+  water-driven-wood and both-needed-leaf cases.)
 
 ### Rot
+
 - Each rotted cell (rot > 0) spreads to each adjacent living cell at probability
   0.02/tick (×2 if the target cell's water > 7, ×0.3 if water < 2)
 - A cell's rot grows 0.02/tick once infected; at rot = 1.0 the cell becomes deadwood
@@ -372,10 +392,12 @@ water-driven-wood and both-needed-leaf cases.)
 ## Soil and Terrain
 
 ### Ground surface
+
 Surface height varies gently: ±2–3 cells of smooth noise across the map, constant for
 the whole run. The seed spawns at the center surface.
 
 ### Soil depth and rocks
+
 - Soil extends 28–32 cells below the surface (randomized per run), then solid bedrock
 - Rock density by depth (`rockProbability` in `sim/terrain.ts`): <5 deep = 0%, 5–15 ≈ 10%,
   15–25 ≈ 25%, 25–35 ≈ 35%, below 35 ≈ 45%.
@@ -389,6 +411,7 @@ the whole run. The seed spawns at the center surface.
 - Rocks are scattered individual cells (occasionally small clumps), generated lazily
 
 ### Soil moisture
+
 - Each soil cell holds 0–20 units of water
 - Rain events deposit water into the top 3–4 soil rows (M6: **0.3 units/tick to the
   top 4 rows** on each rain tick — see `RAIN_DEPOSIT` in `simulate.ts`)
@@ -405,37 +428,43 @@ the whole run. The seed spawns at the center surface.
 ## Structural Integrity
 
 ### Support graph
+
 Hex-grid trees can contain loops, so "subtree" is not well-defined by shape alone.
 Define support explicitly:
+
 - Run BFS from all underground tree cells (the root system) through living + deadwood
   tree cells. Each above-ground cell's **support parent** = its neighbor with the
   smallest BFS distance to ground (ties: prefer the neighbor more directly below).
+
 ### Strength and stress (revised — balance-aware bending model)
+
 The original `load = 1 + lateral²·0.3` model was replaced: it was non-local (re-routing
-the support path made an upper cell's stress jump when you thickened wood *below* it),
+the support path made an upper cell's stress jump when you thickened wood _below_ it),
 too aggressive, and counter-intuitive. The current model (`sim/structure.ts`):
+
 - For each wood cell, accumulate its **supported subtree** down the support parents:
   `cnt` (cells resting on it) and `sumX` (Σ pixel-x of those cells).
-- `moment(cell) = |sumX − cnt·x_self|` — the *horizontal imbalance* of the load it
+- `moment(cell) = |sumX − cnt·x_self|` — the _horizontal imbalance_ of the load it
   carries. Zero for a balanced or purely-vertical load; large for a one-sided
   cantilever (and largest at a limb's attachment, fading to ~0 at the tip). Opposed
   branches cancel; a lone long branch does not.
 - `strength(cell)` = same-row wood within graph distance 2 × 3 (horizontal cross-
   section = a vertical member's girth; min 3). A long branch's own cells read as "wide"
   and thus strong, which is correct — branches don't snap mid-span; their moment is
-  borne by the *narrow trunk at the junction*, which is where the red shows.
+  borne by the _narrow trunk at the junction_, which is where the red shows.
 - `stress = (moment·0.2 + cnt·0.03) / strength`. The small `cnt` term keeps a huge
   balanced canopy on a thin trunk from being totally storm-proof.
 - This is **local**: an upper cell sees only the wood above it, so thickening the trunk
   lower never changes its stress (the old complaint is gone).
 - **Pixel-space caveat:** a constant-`q` stack leans left on screen (x = q + r/2), so it
   genuinely accrues moment and reddens; a "visually straight up" zig-zag trunk (alt
-  upper-left/upper-right) stays near zero. This is honest (the leaning trunk *looks*
+  upper-left/upper-right) stays near zero. This is honest (the leaning trunk _looks_
   leaning) but worth knowing. Calibrated in `structure.test.ts`.
 - Cells with stress > 0.8 (`STRESS_WARN`) get a subtle red tint at all times (early
   warning, and a live preview during planning over real + staged cells).
 
 ### Storms and breaking
+
 - Storm thresholds: minor 1.2, moderate 0.9, severe 0.6
 - During a storm tick, every cell with stress above the threshold has a 50% chance
   to snap (so identical trees don't always fail identically)
@@ -445,16 +474,17 @@ too aggressive, and counter-intuitive. The current model (`sim/structure.ts`):
   east branch — 14 cells lost")
 
 **M8 implementation** (`sim/structure.ts`):
+
 - `computeStructure(cells)` returns per wood-cell `moment`, `strength`, `stress` maps.
   Support graph = multi-source BFS from underground (root) wood cells through tree +
   deadwood; each cell's support parent is its lowest-BFS-distance neighbour (ties →
   larger r, then smaller pixel-x offset — "more directly below"). See "Strength and
   stress" above for the balance-aware bending model (moment / same-row strength).
-- `applyBreakage(cells, removed)` is the shared connectivity rule for *both* storm
+- `applyBreakage(cells, removed)` is the shared connectivity rule for _both_ storm
   snaps and pruning: from the removed set, also drop any wood the roots can no longer
   reach and any terminal left without a wood neighbour. `prune.computeRemovalSet`
   delegates to it (a one-cell breakage), so prune and storm damage can never disagree.
-- Storms live on `SeasonWeather.storm` (deterministic, rolled *after* rain so existing
+- Storms live on `SeasonWeather.storm` (deterministic, rolled _after_ rain so existing
   forecasts are byte-identical). Enabled Year 2+; severity scales with the difficulty
   curve (severe only Year 9+). `runSeason()` returns `{ frames, storms }` (and
   `simulateSeason()` is the frames-only wrapper the sim tests use); the storm check
@@ -472,14 +502,16 @@ too aggressive, and counter-intuitive. The current model (`sim/structure.ts`):
 ## Weather System
 
 ### Seasons
-| Season | Sun angle | Intensity | Rain | Storm chance |
-|--------|-----------|-----------|------|--------------|
-| Spring | 20° | 0.7 | Medium | Medium |
-| Summer | 5° | 1.0 | Low | Low |
-| Fall | 20° | 0.5 | Medium | Medium |
-| Winter | 40° | 0.1 | Low | Low |
+
+| Season | Sun angle | Intensity | Rain   | Storm chance |
+| ------ | --------- | --------- | ------ | ------------ |
+| Spring | 20°       | 0.7       | Medium | Medium       |
+| Summer | 5°        | 1.0       | Low    | Low          |
+| Fall   | 20°       | 0.5       | Medium | Medium       |
+| Winter | 40°       | 0.1       | Low    | Low          |
 
 ### Weather events within a season
+
 - **Rain event**: 8–15 ticks; deposits soil moisture; clouds reduce light during it
 - **Drought**: a season (or two consecutive) with rain probability near zero and
   evaporation × 1.5; always visible in the forecast at least one season ahead
@@ -488,6 +520,7 @@ too aggressive, and counter-intuitive. The current model (`sim/structure.ts`):
 - **Frost**: see frost rules below — this is a core mechanic, not a footnote
 
 ### Frost and the deciduous cycle (core mechanic)
+
 - **The canopy auto-grows in spring/summer/fall and auto-drops at fall's end.** It grows at
   each growing season's first tick (`growAutoLeaves`, see "Auto-leaves") and drops at the
   END of fall (`resolveAutumnDrop` in `simulate.ts`, after fall's last tick, before aging)
@@ -501,7 +534,7 @@ too aggressive, and counter-intuitive. The current model (`sim/structure.ts`):
   somehow present at winter onset. The `shed-leaves` milestone completes on your first
   simulated fall (`seasonSimulated === 'fall'`).
 - **Why the drop is at fall-end, not winter-onset (important fix):** previously the
-  canopy survived into the winter *planning* phase and was frost-killed at winter's
+  canopy survived into the winter _planning_ phase and was frost-killed at winter's
   first sim tick. That meant the winter budget counted leaf energy that was about to be
   destroyed — the player saw "⚡13 in winter" then "⚡3 in spring" and reasonably read it
   as a bug. Dropping the canopy entering winter makes the winter budget honestly equal
@@ -511,13 +544,13 @@ too aggressive, and counter-intuitive. The current model (`sim/structure.ts`):
   leaf/flower/fruit somehow present at winter onset (e.g. a directly-constructed test
   state) and for killing age-0 winter growth.
 - Resorption is **proportional to the leaf's actual energy** (not flat), so the canopy
-  is a genuinely *recoverable* store and the tree re-leafs in spring instead of starving.
+  is a genuinely _recoverable_ store and the tree re-leafs in spring instead of starving.
 - **Off-season shed marking is budget-neutral during planning** — the resorbed energy
-  returns in *next* season's budget, not the current one. Guarded by `recovery.test.ts`.
+  returns in _next_ season's budget, not the current one. Guarded by `recovery.test.ts`.
 - **Spring frost** (possible in early years' forecasts, more common later): kills all
   cells placed in the immediately preceding planning phase. The forecast warns of
   frost risk; planting early in a frost-risk spring is a gamble.
-- **Winter growth**: any *above-ground* cell staged during winter planning dies at the
+- **Winter growth**: any _above-ground_ cell staged during winter planning dies at the
   first frost tick (`winterFrost` kills age-0 cells with `r < surfaceR`). **Underground
   roots are insulated and survive** — so winter's constructive actions are extending the
   root system and pruning. Planning rejects above-ground placement in winter
@@ -526,6 +559,7 @@ too aggressive, and counter-intuitive. The current model (`sim/structure.ts`):
   die, and whether roots should be allowed. Now: no leaves, yes roots.)
 
 ### Forecasting
+
 - **This season**: exact conditions
 - **Next season**: reliable general forecast ("dry", "storms likely", "frost risk")
 - **Two seasons out**: vague trend ("warming", "unsettled")
@@ -538,7 +572,7 @@ see `sim/weather.ts` `generateWeather()`. Because the forecast simply calls the 
 function for upcoming seasons, the forecast is guaranteed to match what is later
 simulated, and reloading never rerolls the future. The simulation's stochastic RNG
 (`rngSeed`) is independent of weather generation. The season being simulated is the
-one the player *planned* (the pre-advance season), carried into `simulateSeason` via
+one the player _planned_ (the pre-advance season), carried into `simulateSeason` via
 the `SeasonWeather` object — `applySeasonAdvance` rolls the displayed label forward,
 but the sim reads season behaviour from the weather, not the label. Drought chance
 from Year 4 is **0.18** (never in winter). Spring frost is forecast-modelled (winter
@@ -546,6 +580,7 @@ always reads "frost risk") but its cell-kill is deferred past M6; winter-onset l
 kill and winter-growth (age-0) frost death are implemented.
 
 ### Difficulty curve
+
 - **Year 1**: gentle. Good rain, no storms, no rot, no pests. Winter 1 still requires
   the leaf-shed lesson and surviving on reserves.
 - **Year 2**: storms enabled (minor/moderate).
@@ -560,6 +595,7 @@ kill and winter-growth (age-0) frost death are implemented.
 ## Planning Phase
 
 ### Energy budget
+
 - Planning budget = the tree's total banked energy (sum across living cells)
 - Costs: tree cell **1**, leaf cell **1**, flower **3**
 - New cells enter the world with water 2 and energy 1 (included in the cost)
@@ -567,7 +603,7 @@ kill and winter-growth (age-0) frost death are implemented.
 - **Spring vigor floor (`SPRING_VIGOR` = 3):** in spring the budget is
   `max(bankedEnergy, 3)`. Leaves are the only energy source but a leaf costs 1 energy
   to grow — so a leafless tree that has drained to 0 (e.g. a new player who spent the
-  seed's reserve on wood) could *never* afford a leaf again: an unrecoverable softlock
+  seed's reserve on wood) could _never_ afford a leaf again: an unrecoverable softlock
   while still alive (roots keep the wood at health 0.5 forever). The floor mints energy
   only into leaves you actually plant (the existing "no payers → no deduction" path),
   so it's a spring-flush recovery lifeline, not a farmable hoard. Healthy trees
@@ -575,6 +611,7 @@ kill and winter-growth (age-0) frost death are implemented.
   canopy is bare. Guarded by `recovery.test.ts` ("starved to 0 … recovers via floor").
 
 ### Staging
+
 - The player stages **wood** (and, in spring, **flowers**). **Leaves are NOT placed by
   hand** — the canopy auto-grows during the simulation (see "Auto-leaves" below).
 - Tap an empty cell adjacent to any tree cell (staged or real) to stage growth there —
@@ -592,9 +629,11 @@ kill and winter-growth (age-0) frost death are implemented.
   other staged cells from the tree, they unstage automatically with refunds.
 
 ### Auto-leaves (M10)
+
 Leaf placement had no real strategy beyond "don't grow in deep shade" — which is the
 engine's own light math — so hand-placing (and the "🍃 Fill leaves" button, and shed-
 marking) was pure tedium. Leaves now **auto-grow**:
+
 - At each growing season's **tick 0** (`growAutoLeaves` in `sim/simulate.ts`), the tree
   puts out leaves on every open above-ground hex adjacent to wood that is (a) at least
   `MIN_LEAF_HEIGHT` (3) cells above the **spawn ground** and (b) **net-positive** — its
@@ -606,7 +645,7 @@ marking) was pure tedium. Leaves now **auto-grow**:
 - **`MIN_LEAF_HEIGHT` is the anti-crawler rule and is load-bearing.** Free auto-leaves
   would otherwise let a flat ground-hugging sprawl carpet itself in unlimited full-sun,
   un-self-shaded, short-water-path leaves (the "ground crawler") — in the harness it
-  out-scored a real tree ~5×. Gating on height *above the spawn ground* (not the per-column
+  out-scored a real tree ~5×. Gating on height _above the spawn ground_ (not the per-column
   surface, which is bumpy ±2-3 and the crawler exploited) makes the crawler non-viable
   (harness: score ~1) while a balanced grower wins (~23) and a fresh seed (energy 8) can
   still build a height-3 trunk turn one and bootstrap. Validated in `cli/play.ts`
@@ -615,26 +654,29 @@ marking) was pure tedium. Leaves now **auto-grow**:
   (`resolveAutumnDrop`, 75% resorb) and the tree is bare entering winter.
 
 ### Modes
+
 A small mode toggle in the HUD: **Wood / Flower**. It appears only in spring planning
 phases after the "Reach 30 cells" milestone (when flowers unlock) — otherwise everything
 the player places is wood, so no toggle is shown.
 
 ### Flower placement rules (relaxed in M9 playtest)
+
 - Spring planning only, and only after the "Reach 30 cells" milestone
 - **Cost 3 energy** (wood/leaf cost 1)
 - Placeable on an empty above-ground hex **or on top of a leaf it replaces** (blooms grow
   among the leaves), adjacent to a wood cell with **health > 0.6** (`FLOWER_ANCHOR_HEALTH`)
 - Flowers are terminal
 - **Why the old rule was scrapped:** it required a strict "branch tip" (no wood above) AND
-  an *empty* neighbour AND one-per-tip. But a healthy canopy fills every tip hex with
+  an _empty_ neighbour AND one-per-tip. But a healthy canopy fills every tip hex with
   leaves, so there was almost never anywhere to bloom — playtesters (and the headless
   harness: healthy tips present, zero valid placements) hit "the flower button is on but I
   can't place anywhere." The rule is now "a bloom needs healthy wood and a spot among the
   leaves," gated by the 3-energy cost rather than geometry. When flower mode is on with no
   valid spot, the HUD explains why.
-See "Flowers, Fruit, and the Annual Reproductive Cycle" for the full lifecycle.
+  See "Flowers, Fruit, and the Annual Reproductive Cycle" for the full lifecycle.
 
 ### Advancing the season
+
 - "Advance Season" button confirms all staged actions and runs the simulation
 - Disabled (with explanatory tooltip) if the staged configuration is invalid
 - During the first 4 years, if >30% of the energy budget is unspent, show a gentle
@@ -677,20 +719,20 @@ See "Flowers, Fruit, and the Annual Reproductive Cycle" for the full lifecycle.
 
 Cell color encodes health and type at a glance:
 
-| State | Color |
-|-------|-------|
-| Healthy tree cell (above ground) | Warm brown `#7B5230` |
-| Healthy tree cell (root) | Deep brown `#5C3A1A` |
-| Healthy leaf | Fresh green `#4CAF50` |
-| Water-stressed leaf | Yellow-green `#A8C060` |
-| Energy-stressed leaf | Dark dull green `#2D6E2D` |
-| Unhealthy tree cell | Desaturates toward gray as health falls |
-| Deadwood | Gray-brown `#8B7355` |
-| Rotted | Dark gray `#5A5A5A`, mottled |
-| Flower | Pale pink `#FFAAB0` |
-| Fruit (unripe → ripe) | Green-tinged → orange-red `#E8703A`, ramped by `maturity` |
-| Soil | Tan `#C4A46B`, darkening with moisture |
-| Rock | Dark gray `#6B6B6B` |
+| State                            | Color                                                     |
+| -------------------------------- | --------------------------------------------------------- |
+| Healthy tree cell (above ground) | Warm brown `#7B5230`                                      |
+| Healthy tree cell (root)         | Deep brown `#5C3A1A`                                      |
+| Healthy leaf                     | Fresh green `#4CAF50`                                     |
+| Water-stressed leaf              | Yellow-green `#A8C060`                                    |
+| Energy-stressed leaf             | Dark dull green `#2D6E2D`                                 |
+| Unhealthy tree cell              | Desaturates toward gray as health falls                   |
+| Deadwood                         | Gray-brown `#8B7355`                                      |
+| Rotted                           | Dark gray `#5A5A5A`, mottled                              |
+| Flower                           | Pale pink `#FFAAB0`                                       |
+| Fruit (unripe → ripe)            | Green-tinged → orange-red `#E8703A`, ramped by `maturity` |
+| Soil                             | Tan `#C4A46B`, darkening with moisture                    |
+| Rock                             | Dark gray `#6B6B6B`                                       |
 
 Stress > 0.8: subtle red tint overlay. Inspected cell: white outline.
 Staged cells: 50% opacity + dashed group outline.
@@ -702,6 +744,7 @@ Staged cells: 50% opacity + dashed group outline.
 React chrome over a full-viewport Canvas.
 
 ### Always visible
+
 - Season + year ("Spring, Year 3") and month-range subtitle ("Mar–May")
 - This season's weather (icons) and next season's forecast (greyed, labeled)
 - Energy available ("⚡ 47")
@@ -710,6 +753,7 @@ React chrome over a full-viewport Canvas.
 - Mode toggle (Wood / Flower — flower only in spring once unlocked) and Advance Season button
 
 ### On demand
+
 - Cell inspector (tap a cell)
 - Goal log: slide-out panel of completed milestones with short evocative entries
   ("Your tree survived its first winter") — never raw system text
@@ -721,10 +765,12 @@ React chrome over a full-viewport Canvas.
 ## Goals, Score, and the End of a Tree
 
 ### Score
+
 Lifetime viable seeds produced. Continuous, always visible, the thing players try
 to beat next run.
 
 ### Milestones (revealed one at a time)
+
 1. Grow a branch tall enough to leaf out (reworded M11 — leaves auto-grow, so the player's
    action is growing the wood up; "Grow your first leaf" was misleading)
 2. Survive your first season
@@ -746,10 +792,11 @@ to beat next run.
 17. Keep your tree alive into its 10th year (longevity — the explicit late-game question)
 18. Grow to 200 cells
 19. Produce 100 lifetime seeds
-... keep generating; milestones never run out
-(The former "recover from rot" milestone is shelved with rot — see Decisions Deferred.)
+    ... keep generating; milestones never run out
+    (The former "recover from rot" milestone is shelved with rot — see Decisions Deferred.)
 
 ### Death and the Memorial (DEFERRED — see Decisions Deferred)
+
 The intended design: when the last living cell dies, the run ends with a **Memorial
 screen** — the tree's final silhouette, its age in years, peak size, lifetime seeds,
 milestones earned, and its cause of death in plain words ("Died in the drought of Year
@@ -769,7 +816,8 @@ scarce summer, harvest in fall. Every threshold is **emergent** from existing sy
 not an artificial gate — so the difficulty arc falls out of the tree's size and shape.
 
 ### 1. Spring — Bloom (a real bet)
-- **Flower mode** appears in the HUD only in **spring** *and* only after the **Reach 30
+
+- **Flower mode** appears in the HUD only in **spring** _and_ only after the **Reach 30
   cells** milestone. Off-season or pre-30, the toggle isn't shown.
 - **Placement**: a flower occupies an empty above-ground hex (or replaces a leaf) adjacent
   to wood with **health > 0.6** (see "Flower placement rules" — the original strict
@@ -783,13 +831,15 @@ not an artificial gate — so the difficulty arc falls out of the tree's size an
   pink gray out** during playback if the branch can't feed it.
 
 ### 2. Spring→Summer — Fruit set (the first filter)
+
 - At the **end of spring simulation** (`setFruit`, mirroring `resolveAutumnDrop`'s timing):
   every flower with **health > 0.5** converts to a `'fruit'` (auto-pollination); every
-  flower at/below 0.5 **drops** — 3 energy wasted. Lesson: *don't bloom more than your
-  spring canopy can keep healthy.*
+  flower at/below 0.5 **drops** — 3 energy wasted. Lesson: _don't bloom more than your
+  spring canopy can keep healthy._
 - A new fruit starts at **`maturity = 0.15`** (see below).
 
 ### 3. Summer — Carry (the gauntlet)
+
 - Fruit drains **0.20 water/tick** — the thirstiest cell, arriving when summer evaporation
   is highest and rain lowest. This is the core mid-game tension.
 - **Maturation bar** (`maturity`, a 0–1 cell field, serialized). Each summer tick, by the
@@ -798,7 +848,7 @@ not an artificial gate — so the difficulty arc falls out of the tree's size an
   - **water < 1** (thirsty): `maturity −= 0.04` — ripeness visibly slips
   - in between: holds
 - **Abort** when `maturity ≤ 0` → drops, no seed (the drought failure you watch happen).
-  This *is* the failure model (chosen over a hard dry-streak rule); normal health decay
+  This _is_ the failure model (chosen over a hard dry-streak rule); normal health decay
   still applies as a backstop if the whole branch dies. A healthy tree reaches 1.0 with
   ~34 of 60 fed ticks — comfortable for a deep-rooted mid-game tree, precarious for a
   shallow young one. Rates are starting points; calibrate in tests.
@@ -807,12 +857,14 @@ not an artificial gate — so the difficulty arc falls out of the tree's size an
   across well-supplied tips near the trunk.
 
 ### 4. Fall onset — Harvest (the payoff)
+
 - At **fall simulation tick 0** (`ripenFruit`): each fruit at `maturity ≥ 1.0` yields
   **+1 seed** (`score += 1`, flat — quantity is the game), then drops. Any fruit still
   below 1.0 at fall onset drops unharvested. Summer is the gauntlet; fall opens with the
   reward. The season summary reports the harvest ("🌰 Harvested 4 seeds").
 
 ### Fruit is heavy (reproduction ↔ structure)
+
 `computeStructure` counts flowers and especially **fruit** (~2–3× a wood cell) into the
 supported-load (`cnt`/`sumX`) of their anchoring wood. Consequences, all emergent:
 a fruit-laden **cantilever** reddens with stress and is far likelier to **snap in a
@@ -821,6 +873,7 @@ and well-fed; fruiting on a far limb is a high-yield gamble. This is the late-ga
 layer without pests/disease yet built.
 
 ### The difficulty arc (emergent, not gated)
+
 - **Young**: low banked energy → afford 0–1 flowers; small spring canopy → flowers gray
   out before set; shallow roots → fruit can't reach maturity before a dry spell aborts it.
   The first seed is a genuine achievement.
@@ -830,8 +883,8 @@ layer without pests/disease yet built.
   spike fruit thirst and reverse maturation → mass abort. Sustaining a big harvest as
   threats stack is the late game.
 
-The player's yearly question: *how many fruit can my roots actually carry through
-August?* Everything else — root depth, trunk width, canopy size, energy reserves —
+The player's yearly question: _how many fruit can my roots actually carry through
+August?_ Everything else — root depth, trunk width, canopy size, energy reserves —
 feeds into that answer.
 
 ---
@@ -865,6 +918,7 @@ feeds into that answer.
   **deferred** with the Memorial — see Decisions Deferred.
 
 **M7 implementation notes**
+
 - Inspector (`ui/Inspector.tsx`) shows type, water, energy, health, rot, age plus a
   plain-language status line ("Water-stressed", "Low on energy", "Thriving", …) so the
   color map is legible. (M8 added a "Load stress" row once the support graph existed.)
@@ -892,7 +946,7 @@ feeds into that answer.
   dirty-rect Canvas redraws (only repaint cells that changed colour), throttle the light
   calculation to every N ticks during playback, and profile whether hex-key string allocation
   (`"${q},${r}"`) is a hot path worth replacing with an integer key.
-- **Soil-moisture "halo" artifact.** Only soil near the tree is simulated and *promoted*
+- **Soil-moisture "halo" artifact.** Only soil near the tree is simulated and _promoted_
   into `cells` (so its moisture persists); the rest renders at the static terrain default.
   Soil darkens with moisture, so the boundary shows as a darker/different patch tracing the
   root system (deep roots at the wet water table are darkest). Players read it as "roots
@@ -900,7 +954,7 @@ feeds into that answer.
   blends the promoted region into the default). Not a gameplay bug.
 - **Playback reads as static.** During the 60-tick season animation the only obvious
   change is the progress bar; per-tick water/energy colour shifts are too subtle to
-  notice. *Partially addressed:* the HUD now shows live total 💧 water / ⚡ energy during
+  notice. _Partially addressed:_ the HUD now shows live total 💧 water / ⚡ energy during
   playback (so absorption/usage is legible as numbers). Still wanted: grow-in pop for new
   cells, a water/energy pulse up the trunk, leaf shimmer, a falling-leaf autumn-drop anim.
 - **Camera doesn't follow growth.** CLAUDE.md specifies a gentle drift to keep new
@@ -917,6 +971,7 @@ for backlog items (BACKLOG.md "Re-enforced branches", "Infinite water stores" / 
 reserve cells"). Documented here so we don't mistake the handlers for working features.
 
 ### `'reinforced wood'` — stronger wood (NOT yet placeable)
+
 - **Intent** (per the author): a wood variant that is structurally stronger but a worse
   conduit — used for internal/base reinforcement. By design it does **not** grow leaves or
   flowers (intentional, not a bug — confirmed in PR review).
@@ -930,6 +985,7 @@ reserve cells"). Documented here so we don't mistake the handlers for working fe
   stages a `'reinforced wood'` cell. Until then none of the above handlers ever fire in play.
 
 ### `'ground water'` — infinite water source (currently UNREACHABLE)
+
 - **Intent:** a deep, effectively infinite water reservoir that rewards creative deep-root
   growth (the "Infinite water stores" backlog item), replacing the passive water-table regen.
 - **What's wired up:** `GROUND_WATER_CAP = 200` is stored in the cell's `water` field as a
@@ -943,6 +999,7 @@ reserve cells"). Documented here so we don't mistake the handlers for working fe
   real: lower the spawn depth into reachable terrain (and re-tune, since it's infinite).
 
 ### Water-table reward — temporarily nerfed (`// TODO: Playtest`)
+
 The passive deep water-table regen in `updateSoil` was kept (it's the live deep-root reward,
 guarding Milestone 9 "Tap the deep water table") but **significantly weakened** pending the
 `'ground water'` replacement: regen rate **0.1 → 0.01/tick** and cap **`SOIL_WATER_CAP` →
@@ -952,6 +1009,7 @@ it refills, so the deep-root payoff is currently much smaller than the design in
 the deep-root reward "done".
 
 ### Build note
+
 Adding these two `CellType`s requires updating every exhaustive `Record<CellType, …>` / switch.
 The `TYPE_LABEL` map in `ui/Inspector.tsx` was missed and broke `tsc` — fixed (both keys added,
 and `'ground water'` treated as terrain in the inspector). When adding a cell type, grep for
@@ -996,24 +1054,24 @@ and `'ground water'` treated as terrain in the inspector). When adding a cell ty
   a Year 8+ difficulty layer without requiring rot or pests to be built first. Build after
   leaf pests (the leaf displacement is mechanically similar).
 - **New cell types (all need balancing before build):**
-  - *Water reserve (cistern).* A specialised cell that holds 200+ water but cannot absorb
+  - _Water reserve (cistern)._ A specialised cell that holds 200+ water but cannot absorb
     from soil or receive diffusion faster than a normal cell — it must be charged by the
     tree's ordinary vascular flow. Acts as a drought buffer: a tree with a cistern near
     the trunk can survive a short dry spell even if the roots run dry. Cost: higher than
     wood (suggested 3–4 energy). Only one cistern should be placeable per tree initially
     (or unlock after the "Tap the deep water table" milestone). Pair with the energy
     reserve below.
-  - *Energy reserve (heartwood cache).* Mirror of the cistern for energy — stores 200+
+  - _Energy reserve (heartwood cache)._ Mirror of the cistern for energy — stores 200+
     energy, cannot photosynthesize, must be charged by ordinary energy diffusion. Lets a
     player bank energy toward a big spring planting without losing it to the cell-count cap.
     Same cost and unlock restrictions as the cistern.
-  - *Conduit (straw).* A woody cell specialised for conduction: higher flow cap than
+  - _Conduit (straw)._ A woody cell specialised for conduction: higher flow cap than
     ordinary wood (e.g. 5 units/tick vs 2) but no storage (water/energy capacity = 1), no
     photosynthesis, no absorption. Lets a player build a "vascular highway" to a distant
     canopy or deep root cluster without thickening the entire trunk. Cost: 2 energy (same as
     wood) but the strategic value comes from routing, so placement matters. Needs
     clarification on exact behaviour — see the message below.
-  - *Reinforced branch.* Costs more energy than wood (suggested: 3) but has 2× strength
+  - _Reinforced branch._ Costs more energy than wood (suggested: 3) but has 2× strength
     in the structure calculation, meaning the same moment produces half the stress. Useful
     for fruiting cantilevers or storm-exposed limbs. No change to water/energy flow.
     Simple extension of the existing structure model.
@@ -1039,51 +1097,61 @@ and `'ground water'` treated as terrain in the inspector). When adding a cell ty
 Build in sequence; don't advance until the current milestone works and feels good.
 
 ### Milestone 1 — Hex grid foundation
+
 - Vite + TypeScript + React setup
 - Canvas, pointy-top hex rendering, axial coordinates
 - Smooth pan (drag) and zoom (pinch/scroll)
 - Tap a cell → log (q, r); verify coordinate math with a colored test pattern
 
 ### Milestone 2 — Terrain and camera
+
 - Procedural terrain: bumpy surface, soil, rocks scaling with depth, lazy generation
 - Camera centered on spawn; soil moisture rendered as color variation
 
 ### Milestone 3 — Placement and planning
+
 - Seed cell at spawn
 - Stage/unstage cells with energy counter; Branch/Leaf toggle; chained staging
 - Group dashed outlines for staged regions
 - Advance Season button (just commits staged cells, no sim yet)
 
 ### Milestone 4 — Water simulation
+
 - Root absorption, water diffusion with in/out caps, metabolism (water only)
 - Soil percolation, evaporation, water table
 - 60-tick playback animation, skippable
 
 ### Milestone 5 — Energy, light, and health
+
 - Per-column light with seasonal sun angle; photosynthesis
 - Energy diffusion; full metabolism; health update; deadwood conversion
 - Leaf transpiration pulling water upward (verify the suction gradient works)
 
 ### Milestone 6 — Seasons, weather, frost
+
 - Four-season cycle, rain events, forecast HUD
 - Winter-onset leaf kill + fall shedding with energy refund
 - Season summary screen
 
 ### Milestone 7 — Goals, inspector, pruning, saves
+
 - Cell inspector; pruning with connectivity-aware removal preview
 - First 8 milestones; goal log
 - Save/load with RNG state; unspent-energy nudge
 
 ### Milestone 8 — Structure and storms
+
 - Support graph, load/stress, live stress tint (including during planning)
 - Storm events with probabilistic breaking and playback highlight
 - Storms enabled from Year 2
 
-### Milestone 9 — Flowers, fruit, and score  ✅ built
+### Milestone 9 — Flowers, fruit, and score ✅ built
+
 The reproductive cycle (see "Flowers, Fruit, and the Annual Reproductive Cycle" for the
 full design). Reordered ahead of rot, which is deferred.
 
 **Implementation:**
+
 - `Cell.maturity?` (fruit ripeness) added and serialized (`sim/cells.ts`, `game/save.ts`),
   with the reproductive constants (`FLOWER_SET_HEALTH`, `FRUIT_START_MATURITY`,
   `FRUIT_FED_WATER`/`FRUIT_THIRSTY_WATER`, `FRUIT_RIPEN_RATE`/`FRUIT_DECLINE_RATE`).
@@ -1114,7 +1182,7 @@ tsx). **Round 1** surfaced four issues, all fixed: (1) water conduction too resi
 fall shedding was busywork → automatic.
 
 **Round 2** (more playtest feedback): (5) the `first-flower` milestone never completed —
-it checked for a flower in the *post-sim* state, but flowers have already set to fruit by
+it checked for a flower in the _post-sim_ state, but flowers have already set to fruit by
 then; now credited via `grewFlowerThisTurn` (committed plan had a flower). (6) The
 **ground-crawler exploit** — flat surface sprawl scored ~4× a normal tree — fixed by the
 height-light factor (see Light calculation). (7) Winter now allows underground root growth
@@ -1123,7 +1191,7 @@ button + visible underground root hints + live playback resource readout (tedium
 
 **Round 3** (the energy-economy overhaul — "tall trees can't keep water up top and energy
 down at the roots; the middle starves of both"). Root cause: the symmetric health rule
-required *every* cell, including inert structural wood, to hold both water AND energy, so
+required _every_ cell, including inert structural wood, to hold both water AND energy, so
 energy made at the leaves had to crawl down to the roots (it never did) and water up to the
 canopy — any tall tree sat pinned at health ~0.5 everywhere. Fixes: (9) **wood health is now
 WATER-driven only** — structure is dead scaffolding + water-conducting sapwood; energy is
@@ -1131,7 +1199,7 @@ just the growth/reproduction currency, free to pool where it's made (see "Health
 This alone made tall trees viable and healthy (the harness `tallGrower` survives every seed;
 the conduction experiment shows height-12 trees fully healthy in every band). (10) With
 health decoupled, **wood upkeep dropped 0.015 → 0.005**, curing the fall-drain subsistence
-trap so a brutally-pruned tree *snowballs* back (item #5 — "is it game over?": no). (11)
+trap so a brutally-pruned tree _snowballs_ back (item #5 — "is it game over?": no). (11)
 **`LIGHT_GROUND_FACTOR` 0.40 → 0.22** re-suppresses the crawler that cheap wood revived.
 (12) Inspector status is now type-aware (a healthy root at energy 0 reads "Thriving", not
 "Low on energy"). (13) "Fill leaves" reserve is season-aware (full spend in spring/summer).
@@ -1145,14 +1213,16 @@ while every band of a tall tree (leaves, canopy wood, mid-trunk, roots) now stay
 **Round 4** (drought canopy + summary legibility, from a Fall-Y4 drought screenshot):
 (14) **Stomatal closure** — a water-stressed canopy throttles transpiration so it survives
 drought instead of crashing to 0 (see Metabolic consumption; new diagnostic `cli/water.ts`,
-which proved deep roots alone were *not* a canopy-drought defence). (15) The season-summary
+which proved deep roots alone were _not_ a canopy-drought defence). (15) The season-summary
 delta colour was hard-coded green, so a storm's **−95 living cells read as a "good" green** —
 now sign-aware (green gain / red loss / grey neutral) for both energy and cells.
 **Use this harness (`play.ts`, `experiments.ts`, `recover.ts`, `water.ts`, `winter.ts`) to
 validate any future balance change before shipping it.**
 
 ### Milestone 10 — Workload reduction & save diagnostics ✅ built
+
 A pass of playtest-driven UX/balance work (brother's second playthrough):
+
 - **Resource-flow overlay** (💧/⚡ HUD toggles), **altitude ruler**, **clearer next-season
   label**, and **bulk speed-prune mode** (tap-to-select; `prune.computeMultiRemoval`).
 - **Save-file diagnostic** (`game/diagnose.ts`) — a dense health report (parasite leaves,
@@ -1173,7 +1243,7 @@ A pass of playtest-driven UX/balance work (brother's second playthrough):
   harness tool `cli/bigtree.ts` guards against the runaway.
 - **Prune guard** — can't prune the entire tree away (`removesEntireTree`); see Pruning.
 - **Known limitation (height incentive):** with no competing trees, a low/wide canopy is
-  naturally *good* at reproduction (wide, well-watered, low storm-moment), so the height
+  naturally _good_ at reproduction (wide, well-watered, low storm-moment), so the height
   incentive is currently artificial. The harness shows the crawler is either **dominant**
   (if it can grow leaves low) or **dead** (walled by `MIN_LEAF_HEIGHT`) — there's no natural
   "viable but worse" middle, because energy-scarcity (the coupling) doesn't touch a
@@ -1181,21 +1251,24 @@ A pass of playtest-driven UX/balance work (brother's second playthrough):
   **shade competition**; until then the wall stays.
 
 ### Milestone 11 — Half-season checkpoints & milestone refresh ✅ built
+
 - **Half-season checkpoints** — a season now simulates in two 30-tick halves with a planning
   checkpoint between (see "Tick structure" → "Half-season checkpoints" for the full design,
   `seasonHalf`, the RNG-per-half scheme, `runSeasonPart`/`applyPlanCommit`, and the balance
   note). Answers the brother's "more turns per season" ask (BACKLOG "Needs info" reading c):
   smaller batches, less drastic change between them, four-season rhythm intact.
 - **Milestone refresh** — reworded `first-leaf` ("Grow a branch tall enough to leaf out") and
-  `shed-leaves` ("Reach your first autumn") since both were *automatic* after M10 auto-leaves
+  `shed-leaves` ("Reach your first autumn") since both were _automatic_ after M10 auto-leaves
   and read as instructions the player couldn't act on. Added four longevity/scale goals
   (`ten-seeds`, `live-decade`, `two-hundred-cells`, `lifetime-100`).
 
 ### Deferred — Rot
+
 (Was Milestone 9; moved to Decisions Deferred.) Infection sites, spread, free pruning of
 dead/dying cells, deadwood crumbling.
 
 ### Deferred — Memorial
+
 (Was part of Milestone 10.) Memorial screen + hall of memorials. See Decisions Deferred.
 
 ---
