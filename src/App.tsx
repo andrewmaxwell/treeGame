@@ -118,7 +118,7 @@ function countLiving(cells: Map<string, Cell>): number {
   for (const c of cells.values()) {
     if (
       c.type === "tree" ||
-      c.type === "reenforced wood" ||
+      c.type === "reinforced wood" ||
       c.type === "leaf" ||
       c.type === "flower" ||
       c.type === "fruit"
@@ -144,7 +144,7 @@ function sumResources(cells: Map<string, Cell>): {
   for (const c of cells.values()) {
     if (
       c.type === "tree" ||
-      c.type === "reenforced wood" ||
+      c.type === "reinforced wood" ||
       c.type === "leaf" ||
       c.type === "flower" ||
       c.type === "fruit"

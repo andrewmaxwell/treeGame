@@ -1,47 +1,56 @@
-import type { Cell } from '../sim/cells'
-import type { GameState, Season } from './state'
-import type { SeasonWeather } from '../sim/weather'
-import { rainTickCount } from '../sim/weather'
-import { bankedEnergy } from './planning'
+import type { Cell } from "../sim/cells";
+import type { GameState, Season } from "./state";
+import type { SeasonWeather } from "../sim/weather";
+import { rainTickCount } from "../sim/weather";
+import { bankedEnergy } from "./planning";
 
 // Everything the post-playback season summary needs, computed by comparing the
 // committed (pre-simulation) state to the final (post-simulation) state.
 export interface SeasonSummaryData {
-  season: Season
-  year: number
-  energyStart: number
-  energyEnd: number
-  cellsStart: number
-  cellsEnd: number
-  cellsGained: number
-  cellsLost: number
-  leavesDropped: number
-  deadwoodCreated: number
-  waterStatus: string
-  events: string[]
+  season: Season;
+  year: number;
+  energyStart: number;
+  energyEnd: number;
+  cellsStart: number;
+  cellsEnd: number;
+  cellsGained: number;
+  cellsLost: number;
+  leavesDropped: number;
+  deadwoodCreated: number;
+  waterStatus: string;
+  events: string[];
 }
 
-const LIVING: ReadonlySet<Cell['type']> = new Set<Cell['type']>(['tree', 'leaf', 'flower', 'fruit'])
+const LIVING: ReadonlySet<Cell["type"]> = new Set<Cell["type"]>([
+  "tree",
+  "leaf",
+  "flower",
+  "fruit",
+]);
 
 function count(cells: Map<string, Cell>, pred: (c: Cell) => boolean): number {
-  let n = 0
-  for (const c of cells.values()) if (pred(c)) n++
-  return n
+  let n = 0;
+  for (const c of cells.values()) if (pred(c)) n++;
+  return n;
 }
 
 function averageTreeWater(cells: Map<string, Cell>): number {
-  let sum = 0, n = 0
+  let sum = 0,
+    n = 0;
   for (const c of cells.values()) {
-    if (c.type === 'tree' || c.type === 'leaf') { sum += c.water; n++ }
+    if (c.type === "tree" || c.type === "leaf") {
+      sum += c.water;
+      n++;
+    }
   }
-  return n === 0 ? 0 : sum / n
+  return n === 0 ? 0 : sum / n;
 }
 
 function waterLabel(avg: number): string {
-  if (avg >= 6) return 'Well watered'
-  if (avg >= 3) return 'Adequately watered'
-  if (avg >= 1) return 'Running dry'
-  return 'Parched'
+  if (avg >= 6) return "Well watered";
+  if (avg >= 3) return "Adequately watered";
+  if (avg >= 1) return "Running dry";
+  return "Parched";
 }
 
 export function buildSeasonSummary(
@@ -49,62 +58,82 @@ export function buildSeasonSummary(
   final: GameState,
   weather: SeasonWeather,
 ): SeasonSummaryData {
-  const energyStart = bankedEnergy(committed.cells)
-  const energyEnd = bankedEnergy(final.cells)
+  const energyStart = bankedEnergy(committed.cells);
+  const energyEnd = bankedEnergy(final.cells);
 
-  const cellsStart = count(committed.cells, (c) => LIVING.has(c.type))
-  const cellsEnd = count(final.cells, (c) => LIVING.has(c.type))
+  const cellsStart = count(committed.cells, (c) => LIVING.has(c.type));
+  const cellsEnd = count(final.cells, (c) => LIVING.has(c.type));
 
-  const leavesStart = count(committed.cells, (c) => c.type === 'leaf')
-  const leavesEnd = count(final.cells, (c) => c.type === 'leaf')
-  const leavesDropped = Math.max(0, leavesStart - leavesEnd)
+  const leavesStart = count(committed.cells, (c) => c.type === "leaf");
+  const leavesEnd = count(final.cells, (c) => c.type === "leaf");
+  const leavesDropped = Math.max(0, leavesStart - leavesEnd);
 
-  const deadStart = count(committed.cells, (c) => c.type === 'deadwood')
-  const deadEnd = count(final.cells, (c) => c.type === 'deadwood')
-  const deadwoodCreated = Math.max(0, deadEnd - deadStart)
+  const deadStart = count(committed.cells, (c) => c.type === "deadwood");
+  const deadEnd = count(final.cells, (c) => c.type === "deadwood");
+  const deadwoodCreated = Math.max(0, deadEnd - deadStart);
 
   // A cell count can both rise (new growth survives) and fall (deaths). We report
   // the net gain and the explicit losses (deaths + drops) separately.
-  const cellsGained = Math.max(0, cellsEnd - cellsStart)
-  const cellsLost = Math.max(0, cellsStart - cellsEnd)
+  const cellsGained = Math.max(0, cellsEnd - cellsStart);
+  const cellsLost = Math.max(0, cellsStart - cellsEnd);
 
-  const events: string[] = []
+  const events: string[] = [];
 
   // Reproductive outcomes lead the summary — the harvest is the point of the year.
-  const seedsHarvested = Math.max(0, final.score - committed.score)
+  const seedsHarvested = Math.max(0, final.score - committed.score);
   if (seedsHarvested > 0) {
-    events.push(`🌰 Harvested ${seedsHarvested} ${seedsHarvested === 1 ? 'seed' : 'seeds'}!`)
+    events.push(
+      `🌰 Harvested ${seedsHarvested} ${seedsHarvested === 1 ? "seed" : "seeds"}!`,
+    );
   }
-  const fruitStart = count(committed.cells, (c) => c.type === 'fruit')
-  const fruitEnd = count(final.cells, (c) => c.type === 'fruit')
-  const fruitLost = Math.max(0, fruitStart - fruitEnd - seedsHarvested)
+  const fruitStart = count(committed.cells, (c) => c.type === "fruit");
+  const fruitEnd = count(final.cells, (c) => c.type === "fruit");
+  const fruitLost = Math.max(0, fruitStart - fruitEnd - seedsHarvested);
   if (fruitLost > 0) {
-    events.push(`🍂 ${fruitLost} ${fruitLost === 1 ? 'fruit' : 'fruit'} dropped before ripening.`)
+    events.push(
+      `🍂 ${fruitLost} ${fruitLost === 1 ? "fruit" : "fruit"} dropped before ripening.`,
+    );
   }
-  const flowerStart = count(committed.cells, (c) => c.type === 'flower')
-  const fruitSet = Math.max(0, fruitEnd - count(committed.cells, (c) => c.type === 'fruit'))
+  const flowerStart = count(committed.cells, (c) => c.type === "flower");
+  const fruitSet = Math.max(
+    0,
+    fruitEnd - count(committed.cells, (c) => c.type === "fruit"),
+  );
   // Fruit set only resolves at spring's END (the second half, final.seasonHalf back to 0),
   // so this line is meaningless after the first half — suppress it there.
-  if (weather.season === 'spring' && flowerStart > 0 && final.seasonHalf === 0) {
-    events.push(`🌸 ${fruitSet} of ${flowerStart} ${flowerStart === 1 ? 'bloom' : 'blooms'} set fruit.`)
+  if (
+    weather.season === "spring" &&
+    flowerStart > 0 &&
+    final.seasonHalf === 0
+  ) {
+    events.push(
+      `🌸 ${fruitSet} of ${flowerStart} ${flowerStart === 1 ? "bloom" : "blooms"} set fruit.`,
+    );
   }
 
-  if (weather.isDrought) events.push('A drought gripped the land — soil ran dry.')
-  const rainTicks = rainTickCount(weather)
+  if (weather.isDrought)
+    events.push("A drought gripped the land — soil ran dry.");
+  const rainTicks = rainTickCount(weather);
   if (rainTicks > 0 && !weather.isDrought) {
-    events.push(rainTicks >= 18 ? 'Heavy rains soaked the soil.' : 'Rains watered the ground.')
+    events.push(
+      rainTicks >= 18
+        ? "Heavy rains soaked the soil."
+        : "Rains watered the ground.",
+    );
   } else if (rainTicks === 0 && !weather.isDrought) {
-    events.push('A dry season — no rain fell.')
+    events.push("A dry season — no rain fell.");
   }
-  if (weather.season === 'winter') {
+  if (weather.season === "winter") {
     events.push(
       leavesDropped > 0
-        ? `Winter frost — ${leavesDropped} ${leavesDropped === 1 ? 'leaf' : 'leaves'} dropped.`
-        : 'Winter frost settled in.',
-    )
+        ? `Winter frost — ${leavesDropped} ${leavesDropped === 1 ? "leaf" : "leaves"} dropped.`
+        : "Winter frost settled in.",
+    );
   }
   if (deadwoodCreated > 0) {
-    events.push(`${deadwoodCreated} ${deadwoodCreated === 1 ? 'cell' : 'cells'} died back to deadwood.`)
+    events.push(
+      `${deadwoodCreated} ${deadwoodCreated === 1 ? "cell" : "cells"} died back to deadwood.`,
+    );
   }
 
   return {
@@ -120,5 +149,5 @@ export function buildSeasonSummary(
     deadwoodCreated,
     waterStatus: waterLabel(averageTreeWater(final.cells)),
     events,
-  }
+  };
 }

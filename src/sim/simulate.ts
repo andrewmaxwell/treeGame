@@ -38,7 +38,7 @@ function isTerminalType(t: CellType): boolean {
 }
 
 const isLivingWood = (type: CellType): boolean =>
-  type === "tree" || type === "reenforced wood";
+  type === "tree" || type === "reinforced wood";
 
 function canExchangeWater(a: Cell, b: Cell): boolean {
   if (a.type === "rock" || b.type === "rock") return false;
@@ -92,7 +92,7 @@ function buildWork(state: GameState): Map<string, Cell> {
     if (
       cell.type !== "tree" &&
       cell.type !== "deadwood" &&
-      cell.type !== "reenforced wood"
+      cell.type !== "reinforced wood"
     )
       continue;
     if (!isUnderground(cell)) continue;
@@ -160,7 +160,7 @@ const RAIN_DEPOSIT = 0.3;
 
 const LIGHT_TYPES: ReadonlySet<CellType> = new Set<CellType>([
   "tree",
-  "reenforced wood",
+  "reinforced wood",
   "leaf",
   "flower",
   "fruit",
@@ -432,7 +432,7 @@ function metabolize(state: GameState, mult: number): GameState {
         w = 0.05;
         e = 0.005;
         break;
-      case "reenforced wood":
+      case "reinforced wood":
         w = 0.075;
         e = 0.005;
         break;
@@ -674,7 +674,7 @@ export function updateHealth(state: GameState): GameState {
     if (cell.type === "tree") {
       // Water-driven, but thirst floors at WOOD_DRY_HEALTH — wood never dies of thirst.
       target = cell.water > WOOD_WATER_OK ? 1.0 : WOOD_DRY_HEALTH;
-    } else if (cell.type === "reenforced wood") {
+    } else if (cell.type === "reinforced wood") {
       target = cell.water > WOOD_WATER_OK ? 1.0 : 0.25;
     } else {
       const hasWater = cell.water > 3;
@@ -826,7 +826,8 @@ function depositResorb(
   const treeKeys: string[] = [];
   for (const [dq, dr] of HEX_NEIGHBORS) {
     const nk = hexKey(leaf.q + dq, leaf.r + dr);
-    if (isLivingWood(work.get(nk)?.type!)) treeKeys.push(nk);
+    const nc = work.get(nk);
+    if (nc && isLivingWood(nc.type)) treeKeys.push(nk);
   }
   if (treeKeys.length === 0) return;
   const share = amount / treeKeys.length;

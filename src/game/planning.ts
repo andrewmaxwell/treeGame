@@ -29,7 +29,7 @@ export const SPRING_VIGOR = 3;
 function isLivingType(t: CellType): boolean {
   return (
     t === "tree" ||
-    t === "reenforced wood" ||
+    t === "reinforced wood" ||
     t === "leaf" ||
     t === "flower" ||
     t === "fruit"
@@ -234,13 +234,10 @@ function isAdjacentToValidAnchor(
 ): boolean {
   for (const [dq, dr] of HEX_NEIGHBORS) {
     const nkey = hexKey(q + dq, r + dr);
-    if (["tree", "reenforced wood"].includes(game.cells.get(nkey)?.type!))
-      return true;
-    if (
-      ["tree", "reenforced wood"].includes(
-        planning.stagedCells.get(nkey)?.type!,
-      )
-    )
+    const gameType = game.cells.get(nkey)?.type;
+    if (gameType && ["tree", "reinforced wood"].includes(gameType)) return true;
+    const stagedType = planning.stagedCells.get(nkey)?.type;
+    if (stagedType && ["tree", "reinforced wood"].includes(stagedType))
       return true;
   }
   return false;
@@ -324,7 +321,7 @@ export function computeReachable(
 
   // Seed: staged tree cells directly touching a real tree cell
   for (const [key, cell] of staged) {
-    if (cell.type !== "tree" && cell.type !== "reenforced wood") continue;
+    if (cell.type !== "tree" && cell.type !== "reinforced wood") continue;
     if (touchesRealTree(cell.q, cell.r, game)) {
       reachable.add(key);
       queue.push([cell.q, cell.r]);
@@ -338,7 +335,7 @@ export function computeReachable(
       const nkey = hexKey(cq + dq, cr + dr);
       if (!reachable.has(nkey)) {
         const nb = staged.get(nkey);
-        if (nb?.type === "tree" || nb?.type === "reenforced wood") {
+        if (nb?.type === "tree" || nb?.type === "reinforced wood") {
           reachable.add(nkey);
           queue.push([nb.q, nb.r]);
         }
@@ -441,7 +438,7 @@ function flowerPlacements(
 function touchesRealTree(q: number, r: number, game: GameState): boolean {
   for (const [dq, dr] of HEX_NEIGHBORS) {
     const t = game.cells.get(hexKey(q + dq, r + dr))?.type;
-    if (t === "tree" || t === "reenforced wood") return true;
+    if (t === "tree" || t === "reinforced wood") return true;
   }
   return false;
 }

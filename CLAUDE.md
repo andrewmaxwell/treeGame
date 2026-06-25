@@ -119,7 +119,7 @@ not from a named subtype. A tree cell below the ground surface behaves as a root
 | `'flower'` | Flower bud; spring only; terminal; becomes fruit if sustained |
 | `'fruit'` | Maturing fruit; terminal; +1 seed score if it survives to ripeness |
 | `'deadwood'` | Dead woody cell; still structural, minor capillary water flow |
-| `'reenforced wood'` | ⚠️ **Experimental, not yet player-usable** — stronger wood (½ moment/stress) but higher water upkeep and no leaves/flowers. See "In-Progress / Experimental Features". |
+| `'reinforced wood'` | ⚠️ **Experimental, not yet player-usable** — stronger wood (½ moment/stress) but higher water upkeep and no leaves/flowers. See "In-Progress / Experimental Features". |
 | `'soil'` | Underground non-tree cell; holds moisture |
 | `'rock'` | Impenetrable; roots cannot pass through; no water flow |
 | `'ground water'` | ⚠️ **Experimental, currently unreachable** — infinite water source (`GROUND_WATER_CAP = 200` sentinel). See "In-Progress / Experimental Features". |
@@ -916,7 +916,7 @@ plumbing in place, but **neither is reachable in actual play yet** — they are 
 for backlog items (BACKLOG.md "Re-enforced branches", "Infinite water stores" / "Water
 reserve cells"). Documented here so we don't mistake the handlers for working features.
 
-### `'reenforced wood'` — stronger wood (NOT yet placeable)
+### `'reinforced wood'` — stronger wood (NOT yet placeable)
 - **Intent** (per the author): a wood variant that is structurally stronger but a worse
   conduit — used for internal/base reinforcement. By design it does **not** grow leaves or
   flowers (intentional, not a bug — confirmed in PR review).
@@ -927,7 +927,7 @@ reserve cells"). Documented here so we don't mistake the handlers for working fe
 - **What's MISSING (why it's inert):** there is **no placement path**. `PlacementMode` is
   only `'branch' | 'flower'`, staging only ever creates `type: 'tree'`, and `stagedCost`
   has no case for it. To make it real: add a placement mode + energy cost + HUD toggle that
-  stages a `'reenforced wood'` cell. Until then none of the above handlers ever fire in play.
+  stages a `'reinforced wood'` cell. Until then none of the above handlers ever fire in play.
 
 ### `'ground water'` — infinite water source (currently UNREACHABLE)
 - **Intent:** a deep, effectively infinite water reservoir that rewards creative deep-root

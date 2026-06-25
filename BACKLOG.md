@@ -17,7 +17,7 @@ with real file paths, to stop the two lists drifting apart.
 - **Finish the two `0.0.2` scaffolding features.** Both have full sim plumbing but are
   unreachable in play (see `CLAUDE.md` "In-Progress / Experimental Features"):
   - _Reinforced wood_ — add the **placement path**: a `PlacementMode`, an energy cost, and a
-    HUD toggle that stages a `'reenforced wood'` cell. The structure/upkeep/colour handlers
+    HUD toggle that stages a `'reinforced wood'` cell. The structure/upkeep/colour handlers
     already exist (½ moment/stress, 0.075 water upkeep, no leaves/flowers by design); without
     a placement path none of them ever fire. Touches: `game/planning.ts`, `ui/HUD.tsx`, `App.tsx`.
   - _Ground water_ — lower `groundWaterProbability`'s spawn depth (currently `>= 100`, far
@@ -72,7 +72,7 @@ keep the wall (current), add an artificial low-canopy penalty (hacky), or build 
 8. **Reinforced branch** — _Value: Med · Effort: Low_
    A wood variant that costs more energy (vs 1) but has 2× strength in the structure
    calculation — same moment, half the stress. Useful for fruiting cantilevers and
-   storm-exposed limbs. **Most of this already exists** as the `'reenforced wood'` scaffolding
+   storm-exposed limbs. **Most of this already exists** as the `'reinforced wood'` scaffolding
    (see "Next up → Finish the two `0.0.2` scaffolding features"); the remaining work is the
    placement path, not the structure model.
    Touches: `game/planning.ts`, `ui/HUD.tsx`, `App.tsx`.

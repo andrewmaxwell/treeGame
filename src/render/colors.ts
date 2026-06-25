@@ -37,8 +37,8 @@ export function cellColor(cell: Cell): string {
       return "#8B7355";
     case "ground water":
       return "rgb(0, 95, 204)";
-    case "reenforced wood":
-      return "#4e2b00"
+    case "reinforced wood":
+      return "#4e2b00";
     default:
       return "rgb(0, 0, 0)";
   }

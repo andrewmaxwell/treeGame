@@ -147,7 +147,11 @@ export function diagnoseReport(game: GameState): string {
   for (const c of woodAbove) {
     for (const [dq, dr] of HEX_NEIGHBORS) {
       const n = cells.get(hexKey(c.q + dq, c.r + dr));
-      if (n && (n.type === "tree" || n.type === "reenforced wood") && isUnderground(n)) {
+      if (
+        n &&
+        (n.type === "tree" || n.type === "reinforced wood") &&
+        isUnderground(n)
+      ) {
         trunkBases++;
         break;
       }
@@ -221,7 +225,7 @@ export function diagnoseReport(game: GameState): string {
   for (const c of cells.values()) {
     if (
       c.type === "tree" ||
-      c.type === "reenforced wood" ||
+      c.type === "reinforced wood" ||
       c.type === "leaf" ||
       c.type === "flower" ||
       c.type === "fruit"

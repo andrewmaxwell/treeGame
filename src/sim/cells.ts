@@ -4,7 +4,7 @@ export type CellType =
   | "flower"
   | "fruit"
   | "deadwood"
-  | "reenforced wood"
+  | "reinforced wood"
   | "ground water"
   | "soil"
   | "rock";

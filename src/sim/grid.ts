@@ -44,7 +44,9 @@ export function pixelToHex(
 
 function hexRound(q: number, r: number): { q: number; r: number } {
   const s = -q - r;
-  let [rq, rr, rs] = [q, r, s].map(Math.round);
+  let rq = Math.round(q),
+    rr = Math.round(r);
+  const rs = Math.round(s);
   const [dq, dr, ds] = [rq - q, rr - r, rs - s].map(Math.abs);
   if (dq > dr && dq > ds) {
     rq = -rr - rs;

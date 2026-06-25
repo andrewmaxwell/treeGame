@@ -13,7 +13,7 @@ import { surfaceR } from "./terrain";
 const WOOD: ReadonlySet<Cell["type"]> = new Set<Cell["type"]>([
   "tree",
   "deadwood",
-  "reenforced wood",
+  "reinforced wood",
 ]);
 const TERMINAL: ReadonlySet<Cell["type"]> = new Set<Cell["type"]>([
   "leaf",
@@ -216,11 +216,11 @@ export function computeStructure(cells: Map<string, Cell>): StructureInfo {
       (momentAmt * MOMENT_W + cnt.get(key)! * LOAD_W) / strength.get(key)!;
     moment.set(
       key,
-      cell.type === "reenforced wood" ? momentAmt / 2 : momentAmt,
+      cell.type === "reinforced wood" ? momentAmt / 2 : momentAmt,
     );
     stress.set(
       key,
-      cell.type === "reenforced wood" ? stressAmt / 2 : stressAmt,
+      cell.type === "reinforced wood" ? stressAmt / 2 : stressAmt,
     );
   }
 
@@ -244,7 +244,7 @@ export function applyBreakage(
   for (const [k, c] of cells) {
     if (out.has(k)) continue;
     if (
-      (c.type === "tree" || c.type === "reenforced wood") &&
+      (c.type === "tree" || c.type === "reinforced wood") &&
       isUnderground(c)
     ) {
       reachable.add(k);
