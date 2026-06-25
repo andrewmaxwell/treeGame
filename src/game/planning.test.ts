@@ -5,6 +5,7 @@ import {
   applyPlanCommit,
   applySeasonAdvance,
   bankedEnergy,
+  getValidPlacements,
   CELL_COST,
   REINFORCED_COST,
   type PlanningState,
@@ -206,6 +207,38 @@ describe("handleTap — reinforced wood", () => {
     expect(bankedEnergy(after.cells)).toBeCloseTo(7, 5);
   });
 
+  it("debits reinforced wood as a payer (budget stays conserved when it holds the energy)", () => {
+    // All the tree's banked energy lives in a reinforced-wood cell; the trunk base holds
+    // none. bankedEnergy (the budget) counts reinforced wood, so the advance deduction must
+    // too — otherwise it finds "no payers", skips the debit, and mints free energy.
+    const game = makeState([
+      mkCell(0, 0, "tree", { energy: 0 }),
+      mkCell(0, -1, "reinforced wood", { energy: 8 }),
+    ]);
+    expect(bankedEnergy(game.cells)).toBe(8);
+
+    let p = createPlanningState(8);
+    p = stage(0, -2, "branch", game, p); // chain up off the reinforced wood
+    p = stage(0, -3, "branch", game, p);
+    p = stage(0, -4, "branch", game, p); // 3 wood @ 1 each
+
+    const after = applySeasonAdvance(game, p);
+    // Conserved: reinforced 8 → 8*(1-3/8)=5, plus 3 new cells @1 = 8 total (no free energy).
+    expect(after.cells.get(hexKey(0, -1))!.energy).toBeCloseTo(5, 5);
+    expect(bankedEnergy(after.cells)).toBeCloseTo(8, 5);
+  });
+
+  it("offers placements adjacent to reinforced wood (it's a valid growth anchor)", () => {
+    const game = makeState([
+      mkCell(0, 0, "tree", { energy: 8 }),
+      mkCell(0, -1, "reinforced wood", { energy: 0 }),
+    ]);
+    const p = createPlanningState(8);
+    const valid = getValidPlacements("branch", game, p);
+    // (0,-2) sits directly above the reinforced cell — must be offered as a growth spot.
+    expect(valid.has(hexKey(0, -2))).toBe(true);
+  });
+
   it("reinforced wood and regular wood can be chained", () => {
     // Stage a regular branch at -1, then a reinforced cell at -2 from it
     const game = makeState([mkCell(0, 0, "tree", { energy: 10 })]);
@@ -213,9 +246,7 @@ describe("handleTap — reinforced wood", () => {
     p = stage(0, -1, "branch", game, p); // cost 1
     p = stage(0, -2, "reinforced", game, p); // cost 2 off staged branch
     expect(p.energySpent).toBe(CELL_COST + REINFORCED_COST);
-    expect(
-      p.stagedCells.get(hexKey(0, -2))!.type,
-    ).toBe("reinforced wood");
+    expect(p.stagedCells.get(hexKey(0, -2))!.type).toBe("reinforced wood");
   });
 });
 

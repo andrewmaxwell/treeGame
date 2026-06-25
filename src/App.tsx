@@ -19,9 +19,7 @@ import {
   computeReachable,
   getValidPlacements,
   bankedEnergy,
-  CELL_COST,
-  REINFORCED_COST,
-  FLOWER_COST,
+  stagedCost,
   SPRING_VIGOR,
   type PlanningState,
   type PlacementMode,
@@ -526,14 +524,9 @@ export function App() {
     const newStaged = new Map(pl.stagedCells);
     let refund = 0;
     for (const k of [...newStaged.keys()]) {
-      if (!reachable.has(k)) {
-        const sc = newStaged.get(k);
-        refund +=
-          sc?.type === "reinforced wood"
-            ? REINFORCED_COST
-            : sc?.type === "flower"
-              ? FLOWER_COST
-              : CELL_COST;
+      const sc = newStaged.get(k);
+      if (sc && !reachable.has(k)) {
+        refund += stagedCost(sc);
         newStaged.delete(k);
       }
     }
@@ -581,14 +574,9 @@ export function App() {
     const newStaged = new Map(pl.stagedCells);
     let refund = 0;
     for (const k of [...newStaged.keys()]) {
-      if (!reachable.has(k)) {
-        const sc = newStaged.get(k);
-        refund +=
-          sc?.type === "reinforced wood"
-            ? REINFORCED_COST
-            : sc?.type === "flower"
-              ? FLOWER_COST
-              : CELL_COST;
+      const sc = newStaged.get(k);
+      if (sc && !reachable.has(k)) {
+        refund += stagedCost(sc);
         newStaged.delete(k);
       }
     }
@@ -722,7 +710,8 @@ export function App() {
 
   // Reinforced wood unlocks once the tree reaches 30 cells — structural tradeoffs only
   // matter once there's real structure to reinforce. Not seasonal (unlike flowers).
-  const reinforcedUnlocked = gameRef.current.goals.completed.includes("thirty-cells");
+  const reinforcedUnlocked =
+    gameRef.current.goals.completed.includes("thirty-cells");
 
   // Flower mode unlocks in spring once the tree has reached 30 cells (milestone 6).
   const flowerUnlocked =

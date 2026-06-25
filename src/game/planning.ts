@@ -14,11 +14,28 @@ export const FLOWER_COST = 3; // energy cost per staged flower (spring only)
 // Health the anchoring wood needs to support a bloom (sickly wood can't flower).
 export const FLOWER_ANCHOR_HEALTH = 0.6;
 
-// Per-staged-cell energy cost (flowers and reinforced wood cost more) — used for spend tracking and refunds.
-function stagedCost(cell: Cell): number {
+// Per-staged-cell energy cost (flowers and reinforced wood cost more) — used for spend
+// tracking and refunds (App.tsx reuses it to refund severed staged growth).
+export function stagedCost(cell: Cell): number {
   if (cell.type === "flower") return FLOWER_COST;
   if (cell.type === "reinforced wood") return REINFORCED_COST;
   return CELL_COST;
+}
+
+// Any structural wood cell — a valid growth anchor and the load-bearing skeleton the
+// support graph walks. Normal branches/roots and reinforced wood both qualify.
+function isWood(t: CellType | undefined): boolean {
+  return t === "tree" || t === "reinforced wood";
+}
+
+// Wood placement comes in two flavors: a normal branch/root or reinforced wood (½
+// structural stress, higher upkeep, no leaves/flowers). Map the wood mode to the cell
+// type it stages and the energy it costs. (Flower mode has its own dedicated path.)
+function woodType(mode: PlacementMode): CellType {
+  return mode === "reinforced" ? "reinforced wood" : "tree";
+}
+function woodCost(mode: PlacementMode): number {
+  return mode === "reinforced" ? REINFORCED_COST : CELL_COST;
 }
 
 // Spring "vigor": a living tree always has at least this much budget in spring,
@@ -153,14 +170,14 @@ export function handleTap(
   // Reinforced wood may also grow up through a leaf.
   if (realCell?.type === "leaf") {
     if (game.season === "winter") return { kind: "rejected_winter" }; // above-ground frost-dies
-    const cost = mode === "reinforced" ? REINFORCED_COST : CELL_COST;
+    const cost = woodCost(mode);
     if (!canAfford(planning, cost)) return { kind: "rejected_energy" };
     if (!isAdjacentToValidAnchor(q, r, game, planning))
       return { kind: "rejected_adjacent" };
     const replacement: Cell = {
       q,
       r,
-      type: mode === "reinforced" ? "reinforced wood" : "tree",
+      type: woodType(mode),
       water: 2,
       energy: 1,
       health: 1,
@@ -204,7 +221,7 @@ export function handleTap(
     return { kind: "rejected_winter" };
 
   // Energy check
-  const placeCost = mode === "reinforced" ? REINFORCED_COST : CELL_COST;
+  const placeCost = woodCost(mode);
   if (!canAfford(planning, placeCost)) return { kind: "rejected_energy" };
 
   // Every hand-placed cell is wood now (leaves auto-grow); underground = root, above = branch.
@@ -212,7 +229,7 @@ export function handleTap(
   const newCell: Cell = {
     q,
     r,
-    type: mode === "reinforced" ? "reinforced wood" : "tree",
+    type: woodType(mode),
     water: 2,
     energy: 1,
     health: 1,
@@ -241,11 +258,8 @@ function isAdjacentToValidAnchor(
 ): boolean {
   for (const [dq, dr] of HEX_NEIGHBORS) {
     const nkey = hexKey(q + dq, r + dr);
-    const gameType = game.cells.get(nkey)?.type;
-    if (gameType && ["tree", "reinforced wood"].includes(gameType)) return true;
-    const stagedType = planning.stagedCells.get(nkey)?.type;
-    if (stagedType && ["tree", "reinforced wood"].includes(stagedType))
-      return true;
+    if (isWood(game.cells.get(nkey)?.type)) return true;
+    if (isWood(planning.stagedCells.get(nkey)?.type)) return true;
   }
   return false;
 }
@@ -326,9 +340,9 @@ export function computeReachable(
   const reachable = new Set<string>();
   const queue: [number, number][] = [];
 
-  // Seed: staged tree cells directly touching a real tree cell
+  // Seed: staged wood cells directly touching a real wood cell
   for (const [key, cell] of staged) {
-    if (cell.type !== "tree" && cell.type !== "reinforced wood") continue;
+    if (!isWood(cell.type)) continue;
     if (touchesRealTree(cell.q, cell.r, game)) {
       reachable.add(key);
       queue.push([cell.q, cell.r]);
@@ -342,7 +356,7 @@ export function computeReachable(
       const nkey = hexKey(cq + dq, cr + dr);
       if (!reachable.has(nkey)) {
         const nb = staged.get(nkey);
-        if (nb?.type === "tree" || nb?.type === "reinforced wood") {
+        if (nb && isWood(nb.type)) {
           reachable.add(nkey);
           queue.push([nb.q, nb.r]);
         }
@@ -356,10 +370,10 @@ export function computeReachable(
       continue;
     for (const [dq, dr] of HEX_NEIGHBORS) {
       const nkey = hexKey(cell.q + dq, cell.r + dr);
-      const isStagedTree =
-        staged.get(nkey)?.type === "tree" && reachable.has(nkey);
-      const isRealTree = game.cells.get(nkey)?.type === "tree";
-      if (isStagedTree || isRealTree) {
+      const isStagedWood =
+        isWood(staged.get(nkey)?.type) && reachable.has(nkey);
+      const isRealWood = isWood(game.cells.get(nkey)?.type);
+      if (isStagedWood || isRealWood) {
         reachable.add(key);
         break;
       }
@@ -375,17 +389,17 @@ export function getValidPlacements(
   planning: PlanningState,
 ): Map<string, "tree" | "flower"> {
   if (mode === "flower") return flowerPlacements(game, planning);
-  const modeCost = mode === "reinforced" ? REINFORCED_COST : CELL_COST;
-  if (!canAfford(planning, modeCost)) return new Map();
+  if (!canAfford(planning, woodCost(mode))) return new Map();
 
   const valid = new Map<string, "tree" | "flower">();
 
+  // Both normal and reinforced wood are valid growth anchors (handleTap allows either).
   const anchors: Array<[number, number]> = [];
   for (const [, cell] of game.cells) {
-    if (cell.type === "tree") anchors.push([cell.q, cell.r]);
+    if (isWood(cell.type)) anchors.push([cell.q, cell.r]);
   }
   for (const [, cell] of planning.stagedCells) {
-    if (cell.type === "tree") anchors.push([cell.q, cell.r]);
+    if (isWood(cell.type)) anchors.push([cell.q, cell.r]);
   }
 
   for (const [aq, ar] of anchors) {
@@ -445,8 +459,7 @@ function flowerPlacements(
 
 function touchesRealTree(q: number, r: number, game: GameState): boolean {
   for (const [dq, dr] of HEX_NEIGHBORS) {
-    const t = game.cells.get(hexKey(q + dq, r + dr))?.type;
-    if (t === "tree" || t === "reinforced wood") return true;
+    if (isWood(game.cells.get(hexKey(q + dq, r + dr))?.type)) return true;
   }
   return false;
 }
@@ -470,17 +483,13 @@ export function applyPlanCommit(
   const netCost = stagedTotal + planning.pruneCostAccrued;
 
   // The payers: pre-existing living cells that survive the plan (not replaced by a
-  // staged cell). New cells' starting energy is part of the cost.
+  // staged cell). New cells' starting energy is part of the cost. Must match the set
+  // bankedEnergy() sums over (the budget) — reinforced wood holds energy and counts too,
+  // else the budget and the debit disagree.
   const payerKeys: string[] = [];
   let payerEnergy = 0;
   for (const [key, cell] of game.cells) {
-    if (
-      cell.type !== "tree" &&
-      cell.type !== "leaf" &&
-      cell.type !== "flower" &&
-      cell.type !== "fruit"
-    )
-      continue;
+    if (!isLivingType(cell.type)) continue;
     if (planning.stagedCells.has(key)) continue;
     payerKeys.push(key);
     payerEnergy += cell.energy;
