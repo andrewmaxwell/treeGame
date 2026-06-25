@@ -20,6 +20,8 @@ import {
   getValidPlacements,
   bankedEnergy,
   CELL_COST,
+  REINFORCED_COST,
+  FLOWER_COST,
   SPRING_VIGOR,
   type PlanningState,
   type PlacementMode,
@@ -330,7 +332,7 @@ export function App() {
     saveGame(gameRef.current);
 
     // Flower mode is spring-only; leaving spring drops back to Wood so the toggle and
-    // placement stay coherent.
+    // placement stay coherent. Reinforced mode is not seasonal so it persists.
     if (finalState.season !== "spring" && modeRef.current === "flower") {
       setMode("branch");
       modeRef.current = "branch";
@@ -525,8 +527,14 @@ export function App() {
     let refund = 0;
     for (const k of [...newStaged.keys()]) {
       if (!reachable.has(k)) {
+        const sc = newStaged.get(k);
+        refund +=
+          sc?.type === "reinforced wood"
+            ? REINFORCED_COST
+            : sc?.type === "flower"
+              ? FLOWER_COST
+              : CELL_COST;
         newStaged.delete(k);
-        refund += CELL_COST;
       }
     }
     planningRef.current = {
@@ -574,8 +582,14 @@ export function App() {
     let refund = 0;
     for (const k of [...newStaged.keys()]) {
       if (!reachable.has(k)) {
+        const sc = newStaged.get(k);
+        refund +=
+          sc?.type === "reinforced wood"
+            ? REINFORCED_COST
+            : sc?.type === "flower"
+              ? FLOWER_COST
+              : CELL_COST;
         newStaged.delete(k);
-        refund += CELL_COST;
       }
     }
     planningRef.current = {
@@ -706,6 +720,10 @@ export function App() {
   // moment for new players, so call it out explicitly.
   const planningSeason = seasonYear.season;
 
+  // Reinforced wood unlocks once the tree reaches 30 cells — structural tradeoffs only
+  // matter once there's real structure to reinforce. Not seasonal (unlike flowers).
+  const reinforcedUnlocked = gameRef.current.goals.completed.includes("thirty-cells");
+
   // Flower mode unlocks in spring once the tree has reached 30 cells (milestone 6).
   const flowerUnlocked =
     planningSeason === "spring" &&
@@ -788,6 +806,7 @@ export function App() {
         springReLeaf={springReLeaf}
         flowerNoSpots={flowerNoSpots}
         mode={mode}
+        reinforcedUnlocked={reinforcedUnlocked}
         flowerUnlocked={flowerUnlocked}
         canAdvance={canAdvance}
         isPlaying={isPlaying}

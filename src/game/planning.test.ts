@@ -5,6 +5,8 @@ import {
   applyPlanCommit,
   applySeasonAdvance,
   bankedEnergy,
+  CELL_COST,
+  REINFORCED_COST,
   type PlanningState,
 } from "./planning";
 import { hexKey } from "../sim/grid";
@@ -52,7 +54,7 @@ function mkCell(
 function stage(
   q: number,
   r: number,
-  mode: "branch" | "flower",
+  mode: "branch" | "reinforced" | "flower",
   game: GameState,
   p: PlanningState,
 ): PlanningState {
@@ -151,6 +153,69 @@ describe("applyPlanCommit — mid-season checkpoint commit", () => {
     // ...but the season/year are untouched (we stay in-season for the second half).
     expect(after.season).toBe("summer");
     expect(after.year).toBe(2);
+  });
+});
+
+// ─── reinforced wood placement ────────────────────────────────────────────────
+
+describe("handleTap — reinforced wood", () => {
+  it("places reinforced wood at REINFORCED_COST, not CELL_COST", () => {
+    const game = makeState([mkCell(0, 0, "tree", { energy: 8 })]);
+    const p = createPlanningState(8);
+    const result = handleTap(0, -1, "reinforced", game, p);
+    expect(result.kind).toBe("placed");
+    expect(result.planning!.energySpent).toBe(REINFORCED_COST);
+    expect(result.planning!.stagedCells.get(hexKey(0, -1))!.type).toBe(
+      "reinforced wood",
+    );
+  });
+
+  it("rejects reinforced wood when energy would be exceeded", () => {
+    const game = makeState([mkCell(0, 0, "tree")]);
+    const p = createPlanningState(REINFORCED_COST - 0.5); // can't afford one
+    const result = handleTap(0, -1, "reinforced", game, p);
+    expect(result.kind).toBe("rejected_energy");
+  });
+
+  it("can replace a leaf with reinforced wood", () => {
+    const game = makeState([
+      mkCell(0, 0, "tree", { energy: 8 }),
+      mkCell(0, -1, "leaf", { energy: 1 }),
+    ]);
+    const p = createPlanningState(8);
+    const result = handleTap(0, -1, "reinforced", game, p);
+    expect(result.kind).toBe("placed");
+    expect(result.planning!.stagedCells.get(hexKey(0, -1))!.type).toBe(
+      "reinforced wood",
+    );
+    expect(result.planning!.energySpent).toBe(REINFORCED_COST);
+  });
+
+  it("reinforced wood deducts REINFORCED_COST proportionally at advance", () => {
+    const game = makeState([mkCell(0, 0, "tree", { energy: 8 })]);
+    let p = createPlanningState(8);
+    p = stage(0, -1, "reinforced", game, p);
+    expect(p.energySpent).toBe(REINFORCED_COST);
+
+    const after = applySeasonAdvance(game, p);
+    // Seed had 8 energy; reinforced cell cost REINFORCED_COST=2; seed pays 2.
+    // seed payer: 8 * (1 - 2/8) = 6; new cell starts with energy=1.
+    // Net banked = 7 (reinforced costs 2 but only stores 1 — the extra 1 goes to the "reinforcement").
+    expect(after.cells.get(hexKey(0, 0))!.energy).toBeCloseTo(6, 5);
+    expect(after.cells.get(hexKey(0, -1))!.type).toBe("reinforced wood");
+    expect(bankedEnergy(after.cells)).toBeCloseTo(7, 5);
+  });
+
+  it("reinforced wood and regular wood can be chained", () => {
+    // Stage a regular branch at -1, then a reinforced cell at -2 from it
+    const game = makeState([mkCell(0, 0, "tree", { energy: 10 })]);
+    let p = createPlanningState(10);
+    p = stage(0, -1, "branch", game, p); // cost 1
+    p = stage(0, -2, "reinforced", game, p); // cost 2 off staged branch
+    expect(p.energySpent).toBe(CELL_COST + REINFORCED_COST);
+    expect(
+      p.stagedCells.get(hexKey(0, -2))!.type,
+    ).toBe("reinforced wood");
   });
 });
 

@@ -6,16 +6,19 @@ import type { GameState, Season } from "./state";
 // Leaves are no longer placed by hand — they auto-grow on net-positive canopy hexes during
 // the simulation (see growAutoLeaves in sim/simulate.ts). The player shapes WOOD and (in
 // spring) FLOWERS; the canopy follows the light automatically.
-export type PlacementMode = "branch" | "flower";
+export type PlacementMode = "branch" | "reinforced" | "flower";
 
 export const CELL_COST = 1; // energy cost per staged tree/leaf cell
+export const REINFORCED_COST = 2; // energy cost per staged reinforced-wood cell (½ stress, higher upkeep, no leaves/flowers)
 export const FLOWER_COST = 3; // energy cost per staged flower (spring only)
 // Health the anchoring wood needs to support a bloom (sickly wood can't flower).
 export const FLOWER_ANCHOR_HEALTH = 0.6;
 
-// Per-staged-cell energy cost (flowers cost more) — used for spend tracking and refunds.
+// Per-staged-cell energy cost (flowers and reinforced wood cost more) — used for spend tracking and refunds.
 function stagedCost(cell: Cell): number {
-  return cell.type === "flower" ? FLOWER_COST : CELL_COST;
+  if (cell.type === "flower") return FLOWER_COST;
+  if (cell.type === "reinforced wood") return REINFORCED_COST;
+  return CELL_COST;
 }
 
 // Spring "vigor": a living tree always has at least this much budget in spring,
@@ -147,15 +150,17 @@ export function handleTap(
 
   // 2. Tapped a real leaf → stage wood here, replacing the leaf on advance (a branch
   // growing up through the canopy). Leaves themselves aren't player-editable anymore.
+  // Reinforced wood may also grow up through a leaf.
   if (realCell?.type === "leaf") {
     if (game.season === "winter") return { kind: "rejected_winter" }; // above-ground frost-dies
-    if (!canAfford(planning, CELL_COST)) return { kind: "rejected_energy" };
+    const cost = mode === "reinforced" ? REINFORCED_COST : CELL_COST;
+    if (!canAfford(planning, cost)) return { kind: "rejected_energy" };
     if (!isAdjacentToValidAnchor(q, r, game, planning))
       return { kind: "rejected_adjacent" };
     const replacement: Cell = {
       q,
       r,
-      type: "tree",
+      type: mode === "reinforced" ? "reinforced wood" : "tree",
       water: 2,
       energy: 1,
       health: 1,
@@ -170,7 +175,7 @@ export function handleTap(
       planning: {
         ...planning,
         stagedCells: newStaged,
-        energySpent: planning.energySpent + CELL_COST,
+        energySpent: planning.energySpent + cost,
       },
     };
   }
@@ -199,13 +204,15 @@ export function handleTap(
     return { kind: "rejected_winter" };
 
   // Energy check
-  if (!canAfford(planning, CELL_COST)) return { kind: "rejected_energy" };
+  const placeCost = mode === "reinforced" ? REINFORCED_COST : CELL_COST;
+  if (!canAfford(planning, placeCost)) return { kind: "rejected_energy" };
 
   // Every hand-placed cell is wood now (leaves auto-grow); underground = root, above = branch.
+  // Reinforced wood has ½ structural stress but higher water upkeep and no leaves/flowers.
   const newCell: Cell = {
     q,
     r,
-    type: "tree",
+    type: mode === "reinforced" ? "reinforced wood" : "tree",
     water: 2,
     energy: 1,
     health: 1,
@@ -221,7 +228,7 @@ export function handleTap(
     planning: {
       ...planning,
       stagedCells: newStaged,
-      energySpent: planning.energySpent + CELL_COST,
+      energySpent: planning.energySpent + placeCost,
     },
   };
 }
@@ -368,7 +375,8 @@ export function getValidPlacements(
   planning: PlanningState,
 ): Map<string, "tree" | "flower"> {
   if (mode === "flower") return flowerPlacements(game, planning);
-  if (!canAfford(planning, CELL_COST)) return new Map();
+  const modeCost = mode === "reinforced" ? REINFORCED_COST : CELL_COST;
+  if (!canAfford(planning, modeCost)) return new Map();
 
   const valid = new Map<string, "tree" | "flower">();
 
