@@ -11,6 +11,65 @@ Sources: playtest feedback (brother, June 2026) + the "Known UX gaps" and
 
 - **Diagnostic upgrades** — per-height band breakdown (water/health by altitude) + a
   smarter verdict so the report stops saying "balanced" when a tree is actually dying.
+
+- **Rock destruction** — _Value: Med · Effort: Low-Med_
+  Implement rock destruction requiring 20 energy per rock.
+  Touches: `game/actions.ts`, `terrain/rock management.ts`.
+
+- **Milestone rewards** — _Value: Med · Effort: Low-Med_
+  Add new cells as rewards for hitting milestones.
+  Touches: `game/milestones.ts`, `game/cell management.ts`.
+
+- **Horizontal growth limit** — _Value: Med · Effort: Low-Med_
+  Limit plant width horizontally, focusing on depth. Increment size per year/season.
+  Touches: `game/growth.ts`, `terrain/terrain generation.ts`.
+
+- **Infinite water stores** — _Value: High · Effort: Med-High_ — 🔨 **scaffolding in progress (branch `0.0.2`)**
+  Replace ground wetness with infinite water stores requiring creative root growth.
+  The `'ground water'` cell type exists and behaves as an infinite source in the sim
+  (`GROUND_WATER_CAP = 200` save-safe sentinel), but it spawns only at `depth >= 100`, so it
+  is **currently unreachable**. Meanwhile the old water-table regen was kept but heavily
+  nerfed (`0.1 → 0.01/tick`, cap halved) and marked `// TODO: Playtest`. Remaining work:
+  lower the spawn depth into reachable terrain and re-tune, then retire the water-table line.
+  See `CLAUDE.md` "In-Progress / Experimental Features".
+  Touches: `sim/terrain.ts`, `sim/simulate.ts`.
+
+- **Resource intensity optimization** — _Value: High · Effort: High_
+  Identify and optimize resource-intensive parts of the game.
+  Touches: `game/simulation.ts`, `game/performance analysis.ts`.
+
+- **Bird predation** — _Value: Med-High · Effort: Low-Med_
+  Implement bird predation for plants above 50ft, eating or moving leaves/branches.
+  Touches: `game/environmental factors.ts`, `game/plant interaction.ts`.
+
+- **Water reserve cells** — _Value: High · Effort: Low-Med_
+  Create cells storing up to 200+ water with no absorption capability.
+  Touches: `game/cell types.ts`, `terrain/water management.ts`.
+
+- **Energy reserve cells** — _Value: High · Effort: Low-Med_
+  Create cells storing up to 200+ energy with no photosynthesis capability.
+  Touches: `game/cell types.ts`, `game/energy management.ts`.
+
+- **Water/Energy+ reserve cells** — _Value: High · Effort: Low-Med_
+  Combine three water or energy reserve cells into one that doubles resource storage.
+  Touches: `game/cell interactions.ts`, `terrain/root growth.ts`.
+
+- **Straws** — _Value: High · Effort: Low-Med_
+  Implement straws to move water and energy more efficiently between points.
+  Touches: `game/cell types.ts`, `terrain/energy distribution.ts`.
+
+- **Re-enforced branches** — _Value: High · Effort: Low-Med_ — 🔨 **scaffolding in progress (branch `0.0.2`)**
+  Create reinforced branches that handle greater load stress, costing extra resources.
+  The `'reenforced wood'` cell type and all its sim plumbing exist (½ moment/stress,
+  0.075 water upkeep, no leaves/flowers by design), but it is **not placeable yet** — no
+  `PlacementMode`, cost, or HUD toggle creates one, so it's currently inert. Remaining work
+  is the placement path + cost. See `CLAUDE.md` "In-Progress / Experimental Features".
+  Touches: `game/planning.ts`, `ui/HUD.tsx`, `App.tsx`.
+
+- **Energy view improvements** — _Value: Med-High · Effort: Low-Med_
+  Improve the energy view button to highlight cells brightly and enhance visibility.
+  Touches: `render/renderer.ts`, `game/energy management.ts`.
+
 - **Auto-clear deadwood** (one-tap or automatic crumble) — further trims the late-game
   prune chore your brother flagged.
 
@@ -114,3 +173,10 @@ keep the wall (current), add an artificial low-canopy penalty (hacky), or build 
   inspector shows their stats but no prune button, and bulk-prune skips them. Flower/fruit
   pruning is now **free**; wound-sealing cost applies only to healthy wood. See `CLAUDE.md`
   "Pruning".
+
+- **Auto-build** — _Value: High · Effort: Low-Med_
+  Shift + click + drag to auto build everything under your mouse. Clicking one at a time is inefficient.
+
+- **Rock gradient** — _Value: Med · Effort: Low-Med_
+  Around 20 feet, rocks become overbearing. Replace with a gradient for deeper growth.
+  Update included and additional depth condition and reducing the default probability
