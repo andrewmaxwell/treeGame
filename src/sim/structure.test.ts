@@ -14,6 +14,9 @@ function cells(list: Cell[]): Map<string, Cell> {
 function c(q: number, r: number, type: Cell["type"] = "tree"): Cell {
   return { q, r, type, water: 5, energy: 5, health: 1, rot: 0, age: 1 };
 }
+function maxOf(m: Map<string, number>): number {
+  return Math.max(...m.values());
+}
 
 // ─── stress: balance-aware bending model ──────────────────────────────────────
 
@@ -43,7 +46,6 @@ describe("computeStructure — stress", () => {
   it("a longer one-sided branch is more stressed than a shorter one", () => {
     const short = computeStructure(cantilever(3));
     const long = computeStructure(cantilever(6));
-    const maxOf = (m: Map<string, number>) => Math.max(...m.values());
     expect(maxOf(long.stress)).toBeGreaterThan(maxOf(short.stress));
   });
 
@@ -91,6 +93,108 @@ describe("computeStructure — stress", () => {
     expect(thick.strength.get(hexKey(0, -1))!).toBeGreaterThan(
       thin.strength.get(hexKey(0, -1))!,
     );
+  });
+});
+
+// ─── load-sharing model: gravity, wind, and distribution ──────────────────────
+
+// A vertical trunk `width` cells across, every column contiguous from underground
+// (r = 2, below the gentle surface) up to r = -height. Anchored across the whole base.
+function vtrunk(height: number, width = 1): Cell[] {
+  const out: Cell[] = [];
+  for (let q = 0; q < width; q++)
+    for (let r = 2; r >= -height; r--) out.push(c(q, r));
+  return out;
+}
+// Pixel-x neighbours within the same row, for outlier checks.
+function rowStresses(
+  s: Map<string, number>,
+  cellsList: Cell[],
+  r: number,
+): number[] {
+  return cellsList
+    .filter((x) => x.r === r && x.type === "tree")
+    .map((x) => s.get(hexKey(x.q, x.r))!);
+}
+
+describe("computeStructure — wind on a tall trunk", () => {
+  it("a tall skinny trunk is heavily stressed at the base and ~free at the top", () => {
+    const list = vtrunk(12, 1);
+    const s = computeStructure(cells(list)).stress;
+    const base = s.get(hexKey(0, -1))!; // just above ground
+    const top = s.get(hexKey(0, -12))!; // nothing above it
+    expect(top).toBeLessThan(0.1);
+    expect(base).toBeGreaterThan(base * 0 + top); // base ≫ top
+    expect(base).toBeGreaterThan(STRESS_WARN); // a spindly tower is storm-risk
+  });
+
+  it("base stress climbs monotonically from the crown to the ground", () => {
+    const s = computeStructure(cells(vtrunk(10, 1))).stress;
+    let prev = 0;
+    for (let h = 10; h >= 1; h--) {
+      const cur = s.get(hexKey(0, -h))!;
+      expect(cur).toBeGreaterThanOrEqual(prev - 1e-9); // non-decreasing downward
+      prev = cur;
+    }
+  });
+
+  it("a taller trunk has a more stressed base (wind grows with height)", () => {
+    const tall = computeStructure(cells(vtrunk(12, 1))).stress.get(
+      hexKey(0, -1),
+    )!;
+    const short = computeStructure(cells(vtrunk(6, 1))).stress.get(
+      hexKey(0, -1),
+    )!;
+    expect(tall).toBeGreaterThan(short * 1.5);
+  });
+
+  it("a leafy crown catches wind: a canopy raises the trunk's base stress", () => {
+    const bare = vtrunk(8, 1);
+    // a small leaf canopy hung at the top of the trunk (weightless, but a wind sail)
+    const leafy = [
+      ...bare,
+      c(1, -8, "leaf"),
+      c(-1, -7, "leaf"),
+      c(1, -7, "leaf"),
+      c(-1, -8, "leaf"),
+    ];
+    const sb = computeStructure(cells(bare)).stress.get(hexKey(0, -1))!;
+    const sl = computeStructure(cells(leafy)).stress.get(hexKey(0, -1))!;
+    expect(sl).toBeGreaterThan(sb);
+  });
+});
+
+describe("computeStructure — load distributes across a thick trunk", () => {
+  it("a thick trunk carries far less peak stress than a 1-wide one of equal height", () => {
+    const skinny = computeStructure(cells(vtrunk(10, 1))).stress;
+    const thick = computeStructure(cells(vtrunk(10, 3))).stress;
+    expect(maxOf(thick)).toBeLessThan(maxOf(skinny) * 0.6);
+  });
+
+  it("no hot cell: a heavy branch on the MIDDLE of a thick trunk spreads, it does not light up one column", () => {
+    // 3-wide trunk; a long branch reaches right off the middle column high up.
+    const list = vtrunk(9, 3);
+    for (let q = 3; q <= 9; q++) list.push(c(q, -6)); // branch off (2,-6)/(1,-6) region
+    const s = computeStructure(cells(list)).stress;
+    // Two rows below the junction the three trunk columns should carry comparable
+    // stress — the load fanned out instead of funnelling down the middle column.
+    const row = rowStresses(s, list, -3); // q = 0,1,2 at r=-3
+    const hi = Math.max(...row),
+      lo = Math.min(...row);
+    expect(row.length).toBe(3);
+    expect(hi).toBeLessThan(lo * 4 + 0.1); // no 10× hot column
+    // and the whole thing stays well-behaved (no runaway concentration)
+    expect(maxOf(s)).toBeLessThan(1.0);
+  });
+
+  it("the branch itself is ~free at its tip and rises toward the trunk junction", () => {
+    const list = vtrunk(9, 3);
+    for (let q = 3; q <= 9; q++) list.push(c(q, -6));
+    const s = computeStructure(cells(list)).stress;
+    const tip = s.get(hexKey(9, -6))!;
+    const nearTrunk = s.get(hexKey(3, -6))!;
+    expect(tip).toBeLessThan(0.1);
+    expect(nearTrunk).toBeGreaterThan(tip);
   });
 });
 

@@ -436,30 +436,59 @@ Define support explicitly:
   tree cells. Each above-ground cell's **support parent** = its neighbor with the
   smallest BFS distance to ground (ties: prefer the neighbor more directly below).
 
-### Strength and stress (revised — balance-aware bending model)
+### Strength and stress (load-sharing bending model)
 
-The original `load = 1 + lateral²·0.3` model was replaced: it was non-local (re-routing
-the support path made an upper cell's stress jump when you thickened wood _below_ it),
-too aggressive, and counter-intuitive. The current model (`sim/structure.ts`):
+**History.** The original `load = 1 + lateral²·0.3` model was non-local and aggressive.
+It was replaced by a single-support-**parent** model (`moment = |sumX − cnt·x|` routed down
+one parent), which was local and balance-aware but had a **fatal distribution bug**: routing
+all of a cell's load through ONE support parent meant a branch landing on the middle of a
+thick trunk funnelled its entire load down a single column — that one cell lit up red while
+its identical neighbours stayed cold ("some random cells under a lot more stress than their
+neighbours"). The current model (`sim/structure.ts`) fixes this by **sharing load across all
+parallel paths**, and adds a wind load case.
 
-- For each wood cell, accumulate its **supported subtree** down the support parents:
-  `cnt` (cells resting on it) and `sumX` (Σ pixel-x of those cells).
-- `moment(cell) = |sumX − cnt·x_self|` — the _horizontal imbalance_ of the load it
-  carries. Zero for a balanced or purely-vertical load; large for a one-sided
-  cantilever (and largest at a limb's attachment, fading to ~0 at the tip). Opposed
-  branches cancel; a lone long branch does not.
-- `strength(cell)` = same-row wood within graph distance 2 × 3 (horizontal cross-
-  section = a vertical member's girth; min 3). A long branch's own cells read as "wide"
-  and thus strong, which is correct — branches don't snap mid-span; their moment is
-  borne by the _narrow trunk at the junction_, which is where the red shows.
-- `stress = (moment·0.2 + cnt·0.03) / strength`. The small `cnt` term keeps a huge
-  balanced canopy on a thin trunk from being totally storm-proof.
-- This is **local**: an upper cell sees only the wood above it, so thickening the trunk
-  lower never changes its stress (the old complaint is gone).
+The tree is treated as a discrete truss; for each wood cell we integrate the internal
+**bending moment** like a beam (`dM = V·ds`) for two independent load cases, then divide by
+the local cross-section:
+
+- **Gravity** (always): every cell has weight (`GRAVITY_WEIGHT`: wood 1, fruit 2.5,
+  flower 0.5, leaf 0). A load stepping DOWN by `Δx` horizontally adds `Vg·Δx` to the moment
+  — so a vertical run adds nothing (pure compression) and only a horizontal **cantilever**
+  builds gravity moment (largest at the limb's attachment, ~0 at the tip). Moments are
+  signed during accumulation, so opposed/​balanced branches cancel; a lone long branch does
+  not.
+- **Wind** (a fixed reference breeze, always on — see the M-series wind decision): every
+  above-ground cell catches a horizontal force (`WIND_AREA`: wood 0.5, leaf 0.35, flower 0.4,
+  fruit 0.6 — a **leafy crown is a sail**, so a tall canopy loads its trunk). A load stepping
+  DOWN by `Δh` in height adds `Vw·Δh`. Wind pushes one way so these do NOT cancel: a tall
+  trunk accrues a large overturning moment at its base regardless of balance. Direction-free
+  in 2D (magnitude depends only on heights). This is the tall-skinny-tree case.
+- **The distribution fix (two parts):** (1) load is pushed down split EQUALLY among every
+  neighbour closer to ground (parallel paths share); (2) the accumulation runs one
+  distance-layer at a time, and within each layer **`equalizeLayer` averages the accumulated
+  shear+moment among connected same-distance cells** — a cross-section shares load as a rigid
+  unit, so no edge cell with a single downward parent can hoard its neighbours' load. A
+  1-wide member (cantilever, skinny trunk) is one cell per layer, so it is untouched.
+- `strength(cell)` = same-row wood within graph distance 2 × 3 (horizontal cross-section =
+  a vertical member's girth; min 3). A long branch's own cells read as "wide" and thus strong
+  — correct, since branches don't snap mid-span; their moment is borne by the _narrow trunk
+  at the junction_, where the red shows. Combined with load-sharing this gives ≈ beam theory's
+  more-than-linear thickness benefit (a thick trunk goes evenly, gently stressed).
+- `stress = (gravityMoment·MOMENT_W + windMoment·WIND_W + Vg·LOAD_W) / strength`, with
+  `MOMENT_W = 0.2`, `WIND_W = 0.03`, `LOAD_W = 0.03` (the small axial term keeps a huge
+  balanced canopy on a thin trunk from being totally storm-proof). Reinforced wood halves its
+  stress. Calibrated against the storm thresholds (below) and `STRESS_WARN` so a normal
+  balanced tree stays clear of the red line while long cantilevers and spindly tall trunks
+  climb into storm-break range. See `structure.test.ts` and the `cli/structure.ts` harness
+  (`npx tsx src/cli/structure.ts`): a height-12 1-wide trunk bases ≫ `STRESS_WARN`; the same
+  height 5-wide is ~0.4 and even; a heavy branch on a thick trunk's middle spreads with no
+  hot cell; a real grown tree's peak sits at the trunk base with no wild same-row outlier.
+- This is still **local**: a cell's moment comes only from the wood above it, so thickening
+  the trunk lower never changes an upper cell's stress.
 - **Pixel-space caveat:** a constant-`q` stack leans left on screen (x = q + r/2), so it
-  genuinely accrues moment and reddens; a "visually straight up" zig-zag trunk (alt
-  upper-left/upper-right) stays near zero. This is honest (the leaning trunk _looks_
-  leaning) but worth knowing. Calibrated in `structure.test.ts`.
+  genuinely accrues gravity moment and reddens; a "visually straight up" zig-zag trunk stays
+  near zero gravity moment (wind still loads it). The leaning trunk _looks_ leaning — honest,
+  but worth knowing.
 - Cells with stress > 0.8 (`STRESS_WARN`) get a subtle red tint at all times (early
   warning, and a live preview during planning over real + staged cells).
 
@@ -475,11 +504,11 @@ too aggressive, and counter-intuitive. The current model (`sim/structure.ts`):
 
 **M8 implementation** (`sim/structure.ts`):
 
-- `computeStructure(cells)` returns per wood-cell `moment`, `strength`, `stress` maps.
-  Support graph = multi-source BFS from underground (root) wood cells through tree +
-  deadwood; each cell's support parent is its lowest-BFS-distance neighbour (ties →
-  larger r, then smaller pixel-x offset — "more directly below"). See "Strength and
-  stress" above for the balance-aware bending model (moment / same-row strength).
+- `computeStructure(cells)` returns per wood-cell `moment` (combined gravity+wind bending
+  demand), `strength`, `stress` maps. Distance-to-ground = multi-source BFS from underground
+  (root) wood cells through tree + deadwood. Load is then integrated down layer-by-layer,
+  shared across all parallel paths and laterally equalized within each cross-section. See
+  "Strength and stress" above for the load-sharing bending model (gravity + wind).
 - `applyBreakage(cells, removed)` is the shared connectivity rule for _both_ storm
   snaps and pruning: from the removed set, also drop any wood the roots can no longer
   reach and any terminal left without a wood neighbour. `prune.computeRemovalSet`
