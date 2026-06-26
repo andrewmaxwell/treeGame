@@ -1001,6 +1001,17 @@ feeds into that answer.
     pairs with two parallel flat arrays — **byte-identical results** (same pair set/order/RNG;
     guarded by the determinism-sensitive sim/save tests) with far less GC churn. A 10k-cell
     half-season advance dropped ~3.5 s → ~2.4 s (≈30%; similar at 1k/3k).
+  - **Canvas draw volume when zoomed all the way out.** A separate bottleneck (not the
+    recompute above): at min zoom each hex is ~4px, so `drawScene` path-fills-and-strokes
+    ~25–30k tiny hexes/frame, dominated by `drawFilledHex`/`fill`/`hexPath`/`stroke` and the
+    per-hex colour computation (`cellColor` chains up to 4 `lerpColor`s). Three safe,
+    visually-identical-when-small fixes in `render/renderer.ts` + `render/colors.ts`: (1) below
+    `RECT_HEX_R` (6px) screen radius draw each cell as a single `fillRect` (no path, no
+    invisible 1px stroke); (2) precompute the 6 constant hex-vertex trig offsets (`HEX_VERT`)
+    instead of 12 trig calls/hex; (3) memoize soil colour across 64 moisture buckets (soil is
+    the most-drawn cell underground). Zoomed-out pan on a 10k tree: p95 26→16 ms, max 27→19 ms
+    (~38→~64 fps on the heavy frames, often a flat 120). Further wins would need batching fills
+    by colour into one Path2D per colour, or a general cell-colour cache — left as candidates.
   - **Still candidates** (not done — larger/riskier): the advance is still a multi-second
     freeze at 10k because the sim retains a full deep `Map` snapshot per tick (30 frames) and
     each tick step re-clones the map; the clean fix is to **stream playback** (simulate tick N

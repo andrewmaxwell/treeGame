@@ -449,6 +449,15 @@ function drawStressTint(
   ctx.restore();
 }
 
+// Below this on-screen radius (px), a hex is only a few pixels: its 1px outline is
+// invisible and a 6-segment path is indistinguishable from a filled rectangle. At that
+// size we draw a single fillRect (no path, no stroke), which is dramatically cheaper than
+// beginPath + 6 lineTo + fill + stroke — the dominant cost when zoomed all the way out on
+// a big tree (drawScene paints ~25-30k tiny hexes/frame). The rect is sized slightly over
+// the hex's bbox so the cells still tile into solid masses with no gaps. Above the
+// threshold (normal/zoomed-in play) the full hex path + gap stroke is used as before.
+const RECT_HEX_R = 6;
+
 function drawFilledHex(
   ctx: CanvasRenderingContext2D,
   cx: number,
@@ -458,8 +467,14 @@ function drawFilledHex(
   stroke: string,
   lineWidth: number,
 ): void {
-  hexPath(ctx, cx, cy, r);
   ctx.fillStyle = fill;
+  if (r < RECT_HEX_R) {
+    const w = r * 1.9;
+    const h = r * 1.75;
+    ctx.fillRect(cx - w / 2, cy - h / 2, w, h);
+    return;
+  }
+  hexPath(ctx, cx, cy, r);
   ctx.fill();
   if (lineWidth > 0) {
     ctx.strokeStyle = stroke;
@@ -467,6 +482,16 @@ function drawFilledHex(
     ctx.stroke();
   }
 }
+
+// The 6 pointy-top vertex unit offsets (cos/sin of π/3·i + π/6) are constant, so compute
+// them once instead of 12 trig calls per hex per frame.
+const HEX_VERT: ReadonlyArray<readonly [number, number]> = Array.from(
+  { length: 6 },
+  (_, i) => {
+    const a = (Math.PI / 3) * i + Math.PI / 6;
+    return [Math.cos(a), Math.sin(a)] as const;
+  },
+);
 
 function hexPath(
   ctx: CanvasRenderingContext2D,
@@ -476,9 +501,9 @@ function hexPath(
 ): void {
   ctx.beginPath();
   for (let i = 0; i < 6; i++) {
-    const angle = (Math.PI / 3) * i + Math.PI / 6;
-    const px = cx + r * Math.cos(angle);
-    const py = cy + r * Math.sin(angle);
+    const [c, s] = HEX_VERT[i];
+    const px = cx + r * c;
+    const py = cy + r * s;
     if (i === 0) ctx.moveTo(px, py);
     else ctx.lineTo(px, py);
   }

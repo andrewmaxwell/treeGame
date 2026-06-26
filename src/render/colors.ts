@@ -2,12 +2,26 @@ import type { Cell } from "../sim/cells";
 import { CELL_WATER_CAP, CELL_ENERGY_CAP, SOIL_WATER_CAP } from "../sim/cells";
 import { surfaceR } from "../sim/terrain";
 
+// Soil is by far the most-drawn cell when zoomed out (the whole underground field), and
+// its colour depends only on moisture. Memoize it across a fixed set of moisture buckets
+// so the per-frame terrain pass does ~64 lerpColor computations instead of one per visible
+// soil hex. 64 buckets is visually continuous (the ramp spans <60 grey-levels of change).
+const SOIL_BUCKETS = 64;
+const soilColorCache: (string | undefined)[] = new Array(SOIL_BUCKETS + 1);
+function soilColor(water: number): string {
+  const t = Math.max(0, Math.min(1, water / SOIL_WATER_CAP));
+  const b = Math.round(t * SOIL_BUCKETS);
+  return (soilColorCache[b] ??= lerpColor(
+    "#C4A46B",
+    "#8B6340",
+    b / SOIL_BUCKETS,
+  ));
+}
+
 export function cellColor(cell: Cell): string {
   switch (cell.type) {
-    case "soil": {
-      const t = Math.max(0, Math.min(1, cell.water / SOIL_WATER_CAP));
-      return lerpColor("#C4A46B", "#8B6340", t);
-    }
+    case "soil":
+      return soilColor(cell.water);
     case "rock":
       return "#6B6B6B";
     case "tree": {
