@@ -30,6 +30,8 @@ import {
 const EMPTY_LIGHT = new Map<string, number>();
 const EMPTY_STRESS = new Map<string, number>();
 const EMPTY_SET = new Set<string>();
+const EMPTY_VP = new Map<string, "tree" | "flower">();
+const EMPTY_STAGED = new Map<string, Cell>();
 
 export interface GameCanvasHandle {
   requestDraw: () => void;
@@ -153,6 +155,28 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
     const overlayRef = useRef<ResourceOverlay>(overlay);
     const pruneModeRef = useRef(pruneMode);
 
+    // Cache for the per-frame planning overlays (valid placements, leaf preview, leaf
+    // light, structural stress). These are O(cells) — heavy on a big tree — but depend
+    // ONLY on the game/planning/mode state, never on the camera. The render loop runs on
+    // every dirty frame, including pan/zoom/shake where only the camera moved, so without
+    // this cache a big tree recomputes ~tens of ms of structure+light every pan frame
+    // (the "nearly unplayable when zoomed out on a huge tree" report). gameRef/planningRef
+    // are reassigned to fresh objects on every real mutation (tap, prune, advance, each
+    // playback frame), so object identity is a sound cache key: it changes exactly when a
+    // recompute is actually needed and stays stable across camera-only redraws.
+    const overlayCacheRef = useRef<{
+      g: GameState;
+      p: PlanningState;
+      m: PlacementMode;
+      playing: boolean;
+      pruneMode: boolean;
+      vp: Map<string, "tree" | "flower">;
+      staged: Map<string, Cell>;
+      leafPreview: Set<string>;
+      leafLight: Map<string, number>;
+      stress: Map<string, number>;
+    } | null>(null);
+
     const panRef = useRef({
       dragging: false,
       lastX: 0,
@@ -259,30 +283,57 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
         const p = planningRef.current;
         const m = modeRef.current;
         if (g && p && m) {
-          // During playback (or bulk-prune selection), hide placement highlights
-          const planning = !isPlaying && !pruneModeRef.current;
-          const vp =
-            isPlaying || pruneModeRef.current
-              ? new Map()
-              : getValidPlacements(m, g, p);
-          const staged = isPlaying ? new Map() : p.stagedCells;
-          // Auto-leaf preview: where the canopy will grow given the current (real+staged)
-          // wood. Shown only during planning (hidden in playback and bulk-prune).
-          const leafPreview = planning
-            ? computeLeafPreview(g, p)
-            : EMPTY_PREVIEW;
-          // During planning, show how much sun each existing leaf receives under the
-          // current season's sun angle, including staged-canopy shading.
-          const leafLight = isPlaying
-            ? EMPTY_LIGHT
-            : computePlanningLight(g, p);
-          // Stress preview: real cells during playback (watch it redden under a storm),
-          // real + staged during planning (see new growth's structural cost live).
-          const stress = isPlaying
-            ? g.cells.size > 0
-              ? computeStructure(g.cells).stress
-              : EMPTY_STRESS
-            : computeStructure(mergeStaged(g, p)).stress;
+          // Recompute the O(cells) planning overlays only when the game/planning state
+          // actually changed — reuse the cache on camera-only redraws (pan/zoom/shake).
+          const cache = overlayCacheRef.current;
+          const fresh =
+            cache !== null &&
+            cache.g === g &&
+            cache.p === p &&
+            cache.m === m &&
+            cache.playing === isPlaying &&
+            cache.pruneMode === pruneModeRef.current;
+          let vp: Map<string, "tree" | "flower">;
+          let staged: Map<string, Cell>;
+          let leafPreview: Set<string>;
+          let leafLight: Map<string, number>;
+          let stress: Map<string, number>;
+          if (fresh) {
+            ({ vp, staged, leafPreview, leafLight, stress } = cache);
+          } else {
+            // During playback (or bulk-prune selection), hide placement highlights
+            const planning = !isPlaying && !pruneModeRef.current;
+            vp =
+              isPlaying || pruneModeRef.current
+                ? EMPTY_VP
+                : getValidPlacements(m, g, p);
+            staged = isPlaying ? EMPTY_STAGED : p.stagedCells;
+            // Auto-leaf preview: where the canopy will grow given the current (real+staged)
+            // wood. Shown only during planning (hidden in playback and bulk-prune).
+            leafPreview = planning ? computeLeafPreview(g, p) : EMPTY_PREVIEW;
+            // During planning, show how much sun each existing leaf receives under the
+            // current season's sun angle, including staged-canopy shading.
+            leafLight = isPlaying ? EMPTY_LIGHT : computePlanningLight(g, p);
+            // Stress preview: real cells during playback (watch it redden under a storm),
+            // real + staged during planning (see new growth's structural cost live).
+            stress = isPlaying
+              ? g.cells.size > 0
+                ? computeStructure(g.cells).stress
+                : EMPTY_STRESS
+              : computeStructure(mergeStaged(g, p)).stress;
+            overlayCacheRef.current = {
+              g,
+              p,
+              m,
+              playing: isPlaying,
+              pruneMode: pruneModeRef.current,
+              vp,
+              staged,
+              leafPreview,
+              leafLight,
+              stress,
+            };
+          }
           const insp = isPlaying ? null : inspectRef.current.key;
           const prune = isPlaying ? EMPTY_SET : inspectRef.current.prune;
           drawScene(

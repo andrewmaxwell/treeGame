@@ -543,29 +543,65 @@ interface DiffuseConfig {
   budget: (c: Cell) => number; // per-tick in/out cap for this cell
 }
 
+// Pack a hex coordinate into a single non-negative integer for the diffusion edge-dedup
+// (see `diffuse`). EDGE_OFF biases coordinates positive; any real tree stays far inside
+// |q|,|r| < EDGE_OFF (a 10k-cell tree spans tens of cells, not thousands). A code fits in
+// [0, 2^24); the combined edge id is code·EDGE_MUL + code < 2^48, comfortably inside the
+// 2^53 exact-integer range, so the dedup is collision-free and fully deterministic.
+const EDGE_OFF = 1 << 11; // 2048
+const EDGE_SPAN = 1 << 12; // 4096 (codes 0 .. 4095 per axis)
+const EDGE_MUL = EDGE_SPAN * EDGE_SPAN; // 2^24
+function edgeCode(q: number, r: number): number {
+  return (q + EDGE_OFF) * EDGE_SPAN + (r + EDGE_OFF);
+}
+
 function diffuse(state: GameState, rng: RNG, cfg: DiffuseConfig): GameState {
   const work = new Map(state.cells);
 
-  // Collect unique exchangeable pairs
-  const seen = new Set<string>();
-  const pairs: Array<[string, string]> = [];
+  // Collect unique exchangeable pairs. Dedup is keyed by a NUMERIC canonical edge id
+  // rather than a `"${keyA}|${keyB}"` template string + string Set: this is the hottest
+  // loop in the sim (6 neighbours × every cell, every tick) and the per-edge string
+  // allocation was the dominant GC driver on a big tree. The id is a perfect hash of the
+  // unordered cell pair, so the dedup decisions — and therefore the pairs array contents,
+  // order, and the subsequent shuffle — are byte-identical to the old string version
+  // (guarded by the determinism-sensitive sim/save tests). `edgeCode` packs each cell into
+  // a 24-bit code (coords offset by EDGE_OFF, supporting |q|,|r| < EDGE_OFF) and combines
+  // them as smaller·EDGE_MUL (2^24) + larger, staying well under 2^53.
+  // Pairs are held as two parallel flat arrays (pairsA[i]/pairsB[i]) rather than an array
+  // of [a, b] tuples — same content and order, but one fewer object allocation per edge
+  // (≈3·cells per pass, every tick) to keep GC pressure down on a big tree.
+  const seen = new Set<number>();
+  const pairsA: string[] = [];
+  const pairsB: string[] = [];
   for (const [keyA, cellA] of work) {
+    const codeA = edgeCode(cellA.q, cellA.r);
     for (const [dq, dr] of HEX_NEIGHBORS) {
-      const keyB = hexKey(cellA.q + dq, cellA.r + dr);
+      const nq = cellA.q + dq;
+      const nr = cellA.r + dr;
+      const keyB = hexKey(nq, nr);
       if (!work.has(keyB)) continue;
-      const pairId = keyA < keyB ? `${keyA}|${keyB}` : `${keyB}|${keyA}`;
-      if (seen.has(pairId)) continue;
+      const codeB = edgeCode(nq, nr);
+      const id =
+        codeA < codeB ? codeA * EDGE_MUL + codeB : codeB * EDGE_MUL + codeA;
+      if (seen.has(id)) continue;
       if (cfg.canExchange(cellA, work.get(keyB)!)) {
-        seen.add(pairId);
-        pairs.push([keyA, keyB]);
+        seen.add(id);
+        pairsA.push(keyA);
+        pairsB.push(keyB);
       }
     }
   }
 
-  // Fisher-Yates shuffle to remove directional bias
-  for (let i = pairs.length - 1; i > 0; i--) {
+  // Fisher-Yates shuffle to remove directional bias (same swaps on both arrays — the
+  // rng draw count and sequence are unchanged, so results stay deterministic).
+  for (let i = pairsA.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1));
-    [pairs[i], pairs[j]] = [pairs[j], pairs[i]];
+    const ta = pairsA[i];
+    pairsA[i] = pairsA[j];
+    pairsA[j] = ta;
+    const tb = pairsB[i];
+    pairsB[i] = pairsB[j];
+    pairsB[j] = tb;
   }
 
   // Per-cell inflow/outflow budgets for this tick
@@ -577,11 +613,14 @@ function diffuse(state: GameState, rng: RNG, cfg: DiffuseConfig): GameState {
     inBudget.set(key, cap);
   }
 
-  for (const [keyA, keyB] of pairs) {
+  for (let i = 0; i < pairsA.length; i++) {
+    const keyA = pairsA[i];
+    const keyB = pairsB[i];
     const diff = cfg.get(work.get(keyA)!) - cfg.get(work.get(keyB)!);
     if (Math.abs(diff) < 1e-9) continue;
 
-    const [sKey, rKey] = diff > 0 ? [keyA, keyB] : [keyB, keyA];
+    const sKey = diff > 0 ? keyA : keyB;
+    const rKey = diff > 0 ? keyB : keyA;
     const sender = work.get(sKey)!;
     const recv = work.get(rKey)!;
 

@@ -982,11 +982,33 @@ feeds into that answer.
   equivalent** — a long-press-then-drag on mobile (the touch handlers only pan/pinch/tap;
   there is no build-drag path). Add a long-press timer that flips a single-touch drag into
   build mode so mobile gets the same one-gesture branch planting.
-- **Performance.** The simulation and Canvas renderer become noticeably heavy on large trees
-  (playtesters report slowdown). Candidates: skip unchanged cells in the diffusion pass,
-  dirty-rect Canvas redraws (only repaint cells that changed colour), throttle the light
-  calculation to every N ticks during playback, and profile whether hex-key string allocation
-  (`"${q},${r}"`) is a hot path worth replacing with an integer key.
+- **Performance (partially addressed).** Profiled the large-tree slowdown a playtester
+  reported as "the more cells I place, the slower it goes" (`src/cli/perf.ts` for the headless
+  sim/recompute timings; a Playwright pan-FPS harness for the in-browser render loop). Found
+  and fixed the two dominant bottlenecks:
+  - **Render-loop recompute on camera-only frames (the "nearly unplayable" symptom).** The
+    canvas render loop recomputed the O(cells) planning overlays — `getValidPlacements`,
+    `autoLeafPreview`, `computeLight`, `computeStructure` — on _every_ dirty frame, including
+    pan/zoom/shake where only the camera moved. Panning a 10k-cell tree spiked frames to
+    ~30–40 ms (~25 fps, janky). `GameCanvas` now caches those overlays keyed on
+    game/planning/mode object identity (which is reassigned fresh on every real mutation but
+    stable across camera moves), so a camera-only redraw reuses the cache. Panning a 10k tree
+    is now a flat ~8 ms/120 fps (p95 30.5→10.4 ms, max 39→11 ms).
+  - **Diffusion allocation during a season advance (the freeze on "Advance Season").** The
+    `diffuse` pair-collection — the hottest sim loop (6 neighbours × every cell, every tick) —
+    allocated a `"${a}|${b}"` template string + string `Set` per edge and an `[a,b]` tuple per
+    pair. Replaced the dedup with a numeric canonical edge id (`edgeCode`/`EDGE_MUL`) and the
+    pairs with two parallel flat arrays — **byte-identical results** (same pair set/order/RNG;
+    guarded by the determinism-sensitive sim/save tests) with far less GC churn. A 10k-cell
+    half-season advance dropped ~3.5 s → ~2.4 s (≈30%; similar at 1k/3k).
+  - **Still candidates** (not done — larger/riskier): the advance is still a multi-second
+    freeze at 10k because the sim retains a full deep `Map` snapshot per tick (30 frames) and
+    each tick step re-clones the map; the clean fix is to **stream playback** (simulate tick N
+    while displaying N−1, spreading the compute across the 2.5 s animation) or move the sim to
+    a **Web Worker**. Also still open from the original list: dirty-rect Canvas redraws,
+    throttling the light calc every N ticks during playback, and a fully integer hex key
+    (the diffusion path no longer allocates the pair strings, but `Map<string, Cell>` keys are
+    still strings everywhere else). Use `npx tsx src/cli/perf.ts` to re-check before/after.
 - **Soil-moisture "halo" artifact.** Only soil near the tree is simulated and _promoted_
   into `cells` (so its moisture persists); the rest renders at the static terrain default.
   Soil darkens with moisture, so the boundary shows as a darker/different patch tracing the
