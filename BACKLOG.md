@@ -14,12 +14,12 @@ environmental threats, etc.) lives in the numbered "Backlog (next)" and "Deferre
 sections below — items that previously appeared in both lists have been consolidated there,
 with real file paths, to stop the two lists drifting apart.
 
-- **Finish the two `0.0.2` scaffolding features.** Both have full sim plumbing but are
-  unreachable in play (see `CLAUDE.md` "In-Progress / Experimental Features"):
-  - _Reinforced wood_ — add the **placement path**: a `PlacementMode`, an energy cost, and a
-    HUD toggle that stages a `'reinforced wood'` cell. The structure/upkeep/colour handlers
-    already exist (½ moment/stress, 0.075 water upkeep, no leaves/flowers by design); without
-    a placement path none of them ever fire. Touches: `game/planning.ts`, `ui/HUD.tsx`, `App.tsx`.
+- **Finish the `0.0.2` scaffolding features.** Full sim plumbing exists but is unreachable in
+  play (see `CLAUDE.md` "In-Progress / Experimental Features"):
+  - _Reinforced wood_ — ✅ **done.** A `"reinforced"` `PlacementMode` (2⚡, ½ structural stress,
+    no leaves/flowers), gated behind the 30-cell milestone with a "Reinforce" HUD toggle. The
+    pre-existing structure/upkeep/colour handlers now actually fire. (`game/planning.ts`,
+    `ui/HUD.tsx`, `App.tsx`.)
   - _Ground water_ — lower `groundWaterProbability`'s spawn depth (currently `>= 100`, far
     below the ~28–35-cell soil column, so a root can't reach it) into reachable terrain and
     re-tune (it's an infinite source, `GROUND_WATER_CAP = 200` sentinel). Then retire the
@@ -69,13 +69,12 @@ keep the wall (current), add an artificial low-canopy penalty (hacky), or build 
    200-energy tree). Fits the existing planning/energy framework with no new systems.
    Touches: `game/planning.ts`, `game/GameCanvas.tsx` (input), HUD cost preview.
 
-8. **Reinforced branch** — _Value: Med · Effort: Low_
-   A wood variant that costs more energy (vs 1) but has 2× strength in the structure
-   calculation — same moment, half the stress. Useful for fruiting cantilevers and
-   storm-exposed limbs. **Most of this already exists** as the `'reinforced wood'` scaffolding
-   (see "Next up → Finish the two `0.0.2` scaffolding features"); the remaining work is the
-   placement path, not the structure model.
-   Touches: `game/planning.ts`, `ui/HUD.tsx`, `App.tsx`.
+8. **Reinforced branch** — ✅ **done** (see "Next up → Finish the `0.0.2` scaffolding features").
+   A wood variant (`'reinforced wood'`, 2⚡) with ½ the structural stress — useful for fruiting
+   cantilevers and storm-exposed limbs. Placeable via the "Reinforce" mode once the 30-cell
+   milestone unlocks. Remaining polish ideas (not blocking): tune the 2⚡ cost / unlock gate
+   against the harness, and a distinct placement-hint colour so reinforced spots read differently
+   from normal wood.
 
 9. **Replacement clarity** — _Value: Med · Effort: Med_
    Staging wood over an existing leaf is supported but just renders the staged cell at

@@ -26,6 +26,7 @@ interface HUDProps {
   springReLeaf: boolean; // spring + leaves actually dropped → prompt to regrow
   flowerNoSpots: boolean; // flower mode active but nowhere valid to bloom
   mode: PlacementMode;
+  reinforcedUnlocked: boolean; // 30-cell milestone → show the Reinforce toggle
   flowerUnlocked: boolean; // spring + 30-cell milestone → show the Flower toggle
   canAdvance: boolean;
   isPlaying: boolean;
@@ -68,6 +69,7 @@ export function HUD({
   springReLeaf,
   flowerNoSpots,
   mode,
+  reinforcedUnlocked,
   flowerUnlocked,
   canAdvance,
   isPlaying,
@@ -301,24 +303,35 @@ export function HUD({
               </span>
 
               {/* Leaves auto-grow on well-lit canopy hexes — the player only shapes wood
-                  (and flowers in spring). The toggle appears only once flowers unlock,
-                  since otherwise everything you place is wood. */}
-              {flowerUnlocked && (
+                  (and flowers in spring). The toggle appears once enough milestones
+                  unlock to give the player real options. */}
+              {(reinforcedUnlocked || flowerUnlocked) && (
                 <div className={styles.modeToggle}>
                   <button
                     className={`${styles.modeBtn} ${mode === "branch" ? styles.modeBtnActive : ""}`}
                     onClick={() => onModeChange("branch")}
-                    title="Grow woody cells: roots below ground, trunk/branches above"
+                    title="Grow standard woody cells (1⚡): roots below ground, trunk/branches above"
                   >
                     {mode === "branch" ? "● " : ""}Wood
                   </button>
-                  <button
-                    className={`${styles.modeBtn} ${mode === "flower" ? styles.modeBtnActive : ""}`}
-                    onClick={() => onModeChange("flower")}
-                    title="Bloom flowers on healthy branches (3⚡ each, spring only) — they set fruit for seeds"
-                  >
-                    {mode === "flower" ? "● " : ""}Flower
-                  </button>
+                  {reinforcedUnlocked && (
+                    <button
+                      className={`${styles.modeBtn} ${mode === "reinforced" ? styles.modeBtnActive : ""}`}
+                      onClick={() => onModeChange("reinforced")}
+                      title="Reinforced wood (2⚡): half the structural stress — good for storm-exposed limbs and fruiting cantilevers. No leaves or flowers."
+                    >
+                      {mode === "reinforced" ? "● " : ""}Reinforce
+                    </button>
+                  )}
+                  {flowerUnlocked && (
+                    <button
+                      className={`${styles.modeBtn} ${mode === "flower" ? styles.modeBtnActive : ""}`}
+                      onClick={() => onModeChange("flower")}
+                      title="Bloom flowers on healthy branches (3⚡ each, spring only) — they set fruit for seeds"
+                    >
+                      {mode === "flower" ? "● " : ""}Flower
+                    </button>
+                  )}
                 </div>
               )}
 

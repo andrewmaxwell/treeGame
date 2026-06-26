@@ -119,18 +119,18 @@ Their appearance and behavior are emergent from position, connectivity, and clus
 not from a named subtype. A tree cell below the ground surface behaves as a root
 (absorbs water from adjacent soil); above ground it behaves as wood.
 
-| Type                | Description                                                                                                                                                            |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `'tree'`            | Any living woody cell (trunk, branch, root — identical in data)                                                                                                        |
-| `'leaf'`            | Leaf cluster; photosynthesizes, transpires, terminal (nothing grows from it)                                                                                           |
-| `'flower'`          | Flower bud; spring only; terminal; becomes fruit if sustained                                                                                                          |
-| `'fruit'`           | Maturing fruit; terminal; +1 seed score if it survives to ripeness                                                                                                     |
-| `'deadwood'`        | Dead woody cell; still structural, minor capillary water flow                                                                                                          |
-| `'reinforced wood'` | ⚠️ **Experimental, not yet player-usable** — stronger wood (½ moment/stress) but higher water upkeep and no leaves/flowers. See "In-Progress / Experimental Features". |
-| `'soil'`            | Underground non-tree cell; holds moisture                                                                                                                              |
-| `'rock'`            | Impenetrable; roots cannot pass through; no water flow                                                                                                                 |
-| `'ground water'`    | ⚠️ **Experimental, currently unreachable** — infinite water source (`GROUND_WATER_CAP = 200` sentinel). See "In-Progress / Experimental Features".                     |
-| (absent)            | Air — empty above-ground cells are simply not stored                                                                                                                   |
+| Type                | Description                                                                                                                                             |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `'tree'`            | Any living woody cell (trunk, branch, root — identical in data)                                                                                         |
+| `'leaf'`            | Leaf cluster; photosynthesizes, transpires, terminal (nothing grows from it)                                                                            |
+| `'flower'`          | Flower bud; spring only; terminal; becomes fruit if sustained                                                                                           |
+| `'fruit'`           | Maturing fruit; terminal; +1 seed score if it survives to ripeness                                                                                      |
+| `'deadwood'`        | Dead woody cell; still structural, minor capillary water flow                                                                                           |
+| `'reinforced wood'` | Stronger wood (½ moment/stress) but higher water upkeep and no leaves/flowers. Placeable via "Reinforce" mode (2⚡) once the 30-cell milestone unlocks. |
+| `'soil'`            | Underground non-tree cell; holds moisture                                                                                                               |
+| `'rock'`            | Impenetrable; roots cannot pass through; no water flow                                                                                                  |
+| `'ground water'`    | ⚠️ **Experimental, currently unreachable** — infinite water source (`GROUND_WATER_CAP = 200` sentinel). See "In-Progress / Experimental Features".      |
+| (absent)            | Air — empty above-ground cells are simply not stored                                                                                                    |
 
 **Terminal cells**: leaves, flowers, and fruit are terminal — no cell may be placed
 attached only to them. New growth must attach to a `'tree'` cell (staged or real).
@@ -655,9 +655,20 @@ marking) was pure tedium. Leaves now **auto-grow**:
 
 ### Modes
 
-A small mode toggle in the HUD: **Wood / Flower**. It appears only in spring planning
-phases after the "Reach 30 cells" milestone (when flowers unlock) — otherwise everything
-the player places is wood, so no toggle is shown.
+A small mode toggle in the HUD: **Wood / Reinforce / Flower**. The toggle appears once any
+non-default mode unlocks — both the **Reinforce** and **Flower** buttons unlock at the "Reach
+30 cells" milestone, but **Reinforce** persists in every season (structure is always relevant)
+while **Flower** shows only in spring. Before 30 cells (and outside spring, with no Reinforce
+unlocked yet — i.e. never, since both unlock together) everything the player places is plain
+wood, so no toggle is shown.
+
+- **Wood** (`'tree'`, 1⚡): branches above ground, roots below.
+- **Reinforce** (`'reinforced wood'`, 2⚡): ½ structural moment/stress — for fruiting
+  cantilevers and storm-exposed limbs — but higher water upkeep (0.075 vs 0.05/tick) and it
+  grows **no leaves or flowers** (the auto-canopy skips it, and flowers can't anchor on it).
+  Stages exactly like wood otherwise (chains, replaces a leaf, valid growth anchor). The
+  placement path is the only thing M-series added; the sim handlers (`structure.ts` halving,
+  upkeep, colour `#4e2b00`, inspector label) pre-existed from the `0.0.2` scaffolding.
 
 ### Flower placement rules (relaxed in M9 playtest)
 
@@ -750,7 +761,8 @@ React chrome over a full-viewport Canvas.
 - Energy available ("⚡ 47")
 - Current goal + progress
 - Seed score ("🌰 4")
-- Mode toggle (Wood / Flower — flower only in spring once unlocked) and Advance Season button
+- Mode toggle (Wood / Reinforce / Flower — Reinforce & Flower unlock at 30 cells; flower only
+  in spring) and Advance Season button
 
 ### On demand
 
@@ -966,11 +978,11 @@ feeds into that answer.
 ## In-Progress / Experimental Features (branch `0.0.2`, "Quality of Life Improvements")
 
 Two new `CellType`s were added on the `0.0.2` branch with most of their simulation
-plumbing in place, but **neither is reachable in actual play yet** — they are scaffolding
-for backlog items (BACKLOG.md "Re-enforced branches", "Infinite water stores" / "Water
-reserve cells"). Documented here so we don't mistake the handlers for working features.
+plumbing in place. **`'reinforced wood'` is now reachable in play** (see below);
+**`'ground water'` is still unreachable scaffolding** (BACKLOG.md "Infinite water stores").
+Documented here so we don't mistake the inert handlers for working features.
 
-### `'reinforced wood'` — stronger wood (NOT yet placeable)
+### `'reinforced wood'` — stronger wood (✅ now placeable)
 
 - **Intent** (per the author): a wood variant that is structurally stronger but a worse
   conduit — used for internal/base reinforcement. By design it does **not** grow leaves or
@@ -979,10 +991,14 @@ reserve cells"). Documented here so we don't mistake the handlers for working fe
   absorption, light occlusion, reachability/anchor checks), `structure.ts` halves its
   `moment` and `stress`, water upkeep is **0.075/tick** (vs 0.05 for `'tree'`), it has its
   own color (`#4e2b00`), and diagnose/inspector/HUD all account for it.
-- **What's MISSING (why it's inert):** there is **no placement path**. `PlacementMode` is
-  only `'branch' | 'flower'`, staging only ever creates `type: 'tree'`, and `stagedCost`
-  has no case for it. To make it real: add a placement mode + energy cost + HUD toggle that
-  stages a `'reinforced wood'` cell. Until then none of the above handlers ever fire in play.
+- **Placement path (added):** `PlacementMode` gained `'reinforced'`, `REINFORCED_COST = 2`,
+  and a HUD "Reinforce" toggle (unlocks with the 30-cell milestone, persists across seasons).
+  `handleTap` stages a `'reinforced wood'` cell (via `woodType`/`woodCost` helpers) for both
+  empty hexes and leaf-replacement; `stagedCost`/`getValidPlacements` (anchors include
+  reinforced wood) / refunds all account for it. The auto-canopy and flower anchors
+  deliberately skip reinforced wood (no leaves/flowers). See "Modes" under Planning Phase.
+- **Not yet driven (future polish):** the 2⚡ cost and 30-cell unlock gate are un-tuned against
+  the harness; the placement-hint colour doesn't distinguish reinforced from normal wood.
 
 ### `'ground water'` — infinite water source (currently UNREACHABLE)
 
@@ -1071,10 +1087,9 @@ and `'ground water'` treated as terrain in the inspector). When adding a cell ty
     canopy or deep root cluster without thickening the entire trunk. Cost: 2 energy (same as
     wood) but the strategic value comes from routing, so placement matters. Needs
     clarification on exact behaviour — see the message below.
-  - _Reinforced branch._ Costs more energy than wood (suggested: 3) but has 2× strength
-    in the structure calculation, meaning the same moment produces half the stress. Useful
-    for fruiting cantilevers or storm-exposed limbs. No change to water/energy flow.
-    Simple extension of the existing structure model.
+  - _Reinforced branch._ ✅ **Built** as `'reinforced wood'` (2⚡, ½ structural stress) — see
+    "Modes" under Planning Phase and the `'reinforced wood'` entry in In-Progress / Experimental
+    Features. Listed here only for history.
 - **Horizontal growth limit with annual expansion.** Proposed: cap how far left/right the
   player can place cells, expanding the allowed radius by a fixed amount each year or season.
   Would focus early play on vertical depth and trunk structure before the canopy sprawls.
