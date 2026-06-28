@@ -10,14 +10,20 @@ import {
   createCamera,
   clampZoom,
   screenToWorld,
+  worldToScreen,
   type Camera,
 } from "../render/camera";
-import { drawScene, BASE_RADIUS } from "../render/renderer";
-import type { ResourceOverlay } from "../render/colors";
+import {
+  drawScene,
+  BASE_RADIUS,
+  GROW_MS,
+  type SceneAnim,
+} from "../render/renderer";
+import { cellColor, type ResourceOverlay } from "../render/colors";
 import { computeLight, autoLeafPreview } from "../sim/simulate";
 import { computeStructure } from "../sim/structure";
 import { SEASON_PARAMS } from "../sim/weather";
-import { pixelToHex, hexToPixel } from "../sim/grid";
+import { pixelToHex, hexToPixel, hexKey } from "../sim/grid";
 import { surfaceR } from "../sim/terrain";
 import type { Cell } from "../sim/cells";
 import type { GameState } from "./state";
@@ -33,11 +39,39 @@ const EMPTY_SET = new Set<string>();
 const EMPTY_VP = new Map<string, "tree" | "flower">();
 const EMPTY_STAGED = new Map<string, Cell>();
 
+// Mobile build-drag (the touch equivalent of desktop Shift+drag): a single-finger
+// touch that stays put for LONG_PRESS_MS flips into build mode, then drags to stage
+// every valid cell the finger passes over. Moving more than LONG_PRESS_MOVE_CANCEL px
+// before the timer fires cancels it (it's a pan/swipe, not a press).
+const LONG_PRESS_MS = 350;
+const LONG_PRESS_MOVE_CANCEL = 10;
+
 export interface GameCanvasHandle {
   requestDraw: () => void;
   triggerShake: () => void;
   recenter: () => void; // re-frame the camera on the current tree (e.g. after New Game)
+  setPlaying: (playing: boolean) => void; // toggles playback animations (pop/shimmer/leaf-fall)
 }
+
+// A drifting, fading leaf shed during playback (autumn drop, storm loss). Render-only —
+// world coordinates so it stays pinned to the tree as the camera pans during the fall.
+interface LeafParticle {
+  x: number; // world px
+  y: number;
+  vx: number; // world px / ms
+  vy: number;
+  rot: number; // radians
+  vrot: number;
+  phase: number; // flutter phase
+  born: number; // ms timestamp
+  life: number; // ms
+  color: string;
+  size: number; // world px
+}
+
+const PARTICLE_GRAVITY = 0.00003; // world px / ms²
+const MAX_PARTICLES = 500; // hard cap so a huge autumn drop can't flood the canvas
+const MAX_SPAWN_PER_DIFF = 200; // and per single frame-to-frame change
 
 interface GameCanvasProps {
   gameRef: RefObject<GameState>;
@@ -177,6 +211,22 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
       stress: Map<string, number>;
     } | null>(null);
 
+    // Playback animation state (render-only). Births (new cell keys) → grow-in pop; deaths
+    // of leaves/flowers/fruit → falling-leaf particles; a continuous shimmer + the pop window
+    // keep the loop redrawing. Diffing is keyed on game-state object identity (lastG) so it
+    // runs once per real frame change, never on a camera-only pan.
+    const playingRef = useRef(false);
+    const animRef = useRef({
+      bornAt: new Map<string, number>(), // cell key → first-seen timestamp (grow-in pop)
+      prevKeys: new Set<string>(), // non-terrain keys shown last diff
+      prevCellMap: null as Map<string, Cell> | null, // for typing/colouring disappeared cells
+      particles: [] as LeafParticle[],
+      inited: false, // first render: adopt the tree without popping it all in
+      animUntil: 0, // keep redrawing until this timestamp (active grow-in pops)
+      lastNow: 0, // for particle dt
+      lastG: null as GameState | null, // identity of the last diffed game state
+    });
+
     const panRef = useRef({
       dragging: false,
       lastX: 0,
@@ -188,6 +238,15 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
       visited: new Set<string>(),
     });
     const pinchRef = useRef({ active: false, lastDist: 0 });
+    // Pending long-press for mobile build mode (timer id + the press-point screen coords,
+    // so the timer can build at the spot the finger went down).
+    const longPressRef = useRef<{ timer: number | null; x: number; y: number }>(
+      {
+        timer: null,
+        x: 0,
+        y: 0,
+      },
+    );
 
     // Expose handle to parent
     useImperativeHandle(
@@ -201,6 +260,12 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
         },
         recenter: () => {
           cameraRef.current = makeCamera(gameRef.current!);
+          dirtyRef.current = true;
+        },
+        setPlaying: (playing: boolean) => {
+          // Set synchronously (before the first playback frame draws) so the commit-moment
+          // grow-in pop isn't missed by the prop-update race.
+          playingRef.current = playing;
           dirtyRef.current = true;
         },
       }),
@@ -235,6 +300,14 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
       [onTap],
     );
 
+    // Cancel a pending mobile long-press (finger moved, lifted, or a second finger landed).
+    const cancelLongPress = useCallback(() => {
+      if (longPressRef.current.timer !== null) {
+        clearTimeout(longPressRef.current.timer);
+        longPressRef.current.timer = null;
+      }
+    }, []);
+
     // Bridge inspector props into the render loop (which reads refs, not props),
     // and force a redraw whenever the highlight changes.
     useEffect(() => {
@@ -253,6 +326,13 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
       pruneModeRef.current = pruneMode;
       dirtyRef.current = true;
     }, [pruneMode]);
+
+    // Keep the animation play-flag in sync with the prop (the handle also sets it
+    // synchronously at playback start to win the first-frame race).
+    useEffect(() => {
+      playingRef.current = isPlaying;
+      dirtyRef.current = true;
+    }, [isPlaying]);
 
     // ── Render loop ───────────────────────────────────────────────────────────
     useEffect(() => {
@@ -342,6 +422,55 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
           }
           const insp = isPlaying ? null : inspectRef.current.key;
           const prune = isPlaying ? EMPTY_SET : inspectRef.current.prune;
+
+          // ── Playback animation diff (once per real frame change) ───────────────
+          const a = animRef.current;
+          const dt = Math.min(50, now - a.lastNow);
+          a.lastNow = now;
+          if (a.lastG !== g) {
+            const cur = new Set<string>();
+            for (const c of g.cells.values()) {
+              if (c.type === "soil" || c.type === "rock") continue;
+              cur.add(hexKey(c.q, c.r));
+            }
+            if (!a.inited) {
+              a.inited = true; // adopt the initial/loaded tree without popping it all in
+            } else if (playingRef.current) {
+              // Births → grow-in pop (only during playback, so load/new-game don't pop).
+              for (const k of cur) if (!a.prevKeys.has(k)) a.bornAt.set(k, now);
+              // Deaths of soft tissue → falling-leaf particles (autumn drop / storm loss).
+              if (a.prevCellMap) {
+                let spawned = 0;
+                for (const k of a.prevKeys) {
+                  if (cur.has(k) || spawned >= MAX_SPAWN_PER_DIFF) continue;
+                  if (a.particles.length >= MAX_PARTICLES) break;
+                  const c = a.prevCellMap.get(k);
+                  if (
+                    c &&
+                    (c.type === "leaf" ||
+                      c.type === "flower" ||
+                      c.type === "fruit")
+                  ) {
+                    a.particles.push(spawnParticle(c, now));
+                    spawned++;
+                  }
+                }
+              }
+              if (a.bornAt.size > 0) a.animUntil = now + GROW_MS;
+            }
+            // Drop finished/removed grow-ins so bornAt can't grow unbounded.
+            for (const [k, t] of a.bornAt)
+              if (!cur.has(k) || now - t > GROW_MS) a.bornAt.delete(k);
+            a.prevKeys = cur;
+            a.prevCellMap = g.cells;
+            a.lastG = g;
+          }
+          // Skip the per-cell animation work entirely on a plain (e.g. camera-only) redraw.
+          const sceneAnim: SceneAnim | null =
+            a.bornAt.size > 0 || playingRef.current
+              ? { now, bornAt: a.bornAt, shimmer: playingRef.current }
+              : null;
+
           drawScene(
             ctx,
             width,
@@ -357,7 +486,17 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
             prune,
             stress,
             overlayRef.current,
+            sceneAnim,
           );
+
+          // Falling leaves, drawn over the scene (drawScene cleared the canvas first).
+          if (a.particles.length > 0)
+            drawParticles(ctx, a.particles, now, dt, drawCam, width, height);
+
+          // Keep redrawing while anything is animating (playback shimmer, active pops,
+          // or leaves still falling).
+          if (playingRef.current || now < a.animUntil || a.particles.length > 0)
+            dirtyRef.current = true;
         }
       }
 
@@ -500,68 +639,126 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
     }, []);
 
     // ── Touch ─────────────────────────────────────────────────────────────────
-    const onTouchStart = useCallback((e: React.TouchEvent) => {
-      if (e.touches.length === 1) {
-        const t = e.touches[0];
-        panRef.current = {
-          dragging: true,
-          lastX: t.clientX,
-          lastY: t.clientY,
-          moved: false,
-        };
-        pinchRef.current.active = false;
-      } else if (e.touches.length === 2) {
-        panRef.current.dragging = false;
-        pinchRef.current = {
-          active: true,
-          lastDist: touchDist(e.touches[0], e.touches[1]),
-        };
-      }
-    }, []);
+    const onTouchStart = useCallback(
+      (e: React.TouchEvent) => {
+        if (e.touches.length === 1) {
+          const t = e.touches[0];
+          panRef.current = {
+            dragging: true,
+            lastX: t.clientX,
+            lastY: t.clientY,
+            moved: false,
+          };
+          pinchRef.current.active = false;
+          // Arm the long-press: holding still here flips into build-drag mode.
+          cancelLongPress();
+          longPressRef.current = {
+            x: t.clientX,
+            y: t.clientY,
+            timer: window.setTimeout(() => {
+              longPressRef.current.timer = null;
+              panRef.current.dragging = false; // stop panning; we're building now
+              buildDragRef.current.active = true;
+              buildDragRef.current.visited.clear();
+              navigator.vibrate?.(15); // haptic confirmation the mode flipped
+              buildAtScreenPos(longPressRef.current.x, longPressRef.current.y);
+              dirtyRef.current = true;
+            }, LONG_PRESS_MS),
+          };
+        } else if (e.touches.length === 2) {
+          cancelLongPress();
+          buildDragRef.current.active = false;
+          buildDragRef.current.visited.clear();
+          panRef.current.dragging = false;
+          pinchRef.current = {
+            active: true,
+            lastDist: touchDist(e.touches[0], e.touches[1]),
+          };
+        }
+      },
+      [buildAtScreenPos, cancelLongPress],
+    );
 
-    const onTouchMove = useCallback((e: React.TouchEvent) => {
-      e.preventDefault();
-      if (e.touches.length === 1 && panRef.current.dragging) {
-        const t = e.touches[0];
-        const dx = t.clientX - panRef.current.lastX;
-        const dy = t.clientY - panRef.current.lastY;
-        if (Math.abs(dx) > 2 || Math.abs(dy) > 2) panRef.current.moved = true;
-        cameraRef.current.x -= dx / cameraRef.current.zoom;
-        cameraRef.current.y -= dy / cameraRef.current.zoom;
-        panRef.current.lastX = t.clientX;
-        panRef.current.lastY = t.clientY;
-        dirtyRef.current = true;
-      } else if (e.touches.length === 2 && pinchRef.current.active) {
-        const dist = touchDist(e.touches[0], e.touches[1]);
-        const factor = dist / pinchRef.current.lastDist;
-        pinchRef.current.lastDist = dist;
-        const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-        const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-        const rect = canvasRef.current!.getBoundingClientRect();
-        const cam = cameraRef.current;
-        const { wx: wx0, wy: wy0 } = screenToWorld(
-          midX - rect.left,
-          midY - rect.top,
-          cam,
-          rect.width,
-          rect.height,
-        );
-        cam.zoom = clampZoom(cam.zoom * factor);
-        const { wx: wx1, wy: wy1 } = screenToWorld(
-          midX - rect.left,
-          midY - rect.top,
-          cam,
-          rect.width,
-          rect.height,
-        );
-        cam.x += wx0 - wx1;
-        cam.y += wy0 - wy1;
-        dirtyRef.current = true;
-      }
-    }, []);
+    const onTouchMove = useCallback(
+      (e: React.TouchEvent) => {
+        e.preventDefault();
+        // Build mode active: every cell the finger passes over gets staged.
+        if (e.touches.length === 1 && buildDragRef.current.active) {
+          const t = e.touches[0];
+          buildAtScreenPos(t.clientX, t.clientY);
+          return;
+        }
+        if (e.touches.length === 1 && panRef.current.dragging) {
+          const t = e.touches[0];
+          const dx = t.clientX - panRef.current.lastX;
+          const dy = t.clientY - panRef.current.lastY;
+          if (Math.abs(dx) > 2 || Math.abs(dy) > 2) panRef.current.moved = true;
+          // A real drag means this is a pan/swipe, not a press — disarm the long-press.
+          if (
+            longPressRef.current.timer !== null &&
+            (Math.abs(t.clientX - longPressRef.current.x) >
+              LONG_PRESS_MOVE_CANCEL ||
+              Math.abs(t.clientY - longPressRef.current.y) >
+                LONG_PRESS_MOVE_CANCEL)
+          ) {
+            cancelLongPress();
+          }
+          cameraRef.current.x -= dx / cameraRef.current.zoom;
+          cameraRef.current.y -= dy / cameraRef.current.zoom;
+          panRef.current.lastX = t.clientX;
+          panRef.current.lastY = t.clientY;
+          dirtyRef.current = true;
+        } else if (e.touches.length === 2 && pinchRef.current.active) {
+          const dist = touchDist(e.touches[0], e.touches[1]);
+          const factor = dist / pinchRef.current.lastDist;
+          pinchRef.current.lastDist = dist;
+          const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+          const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+          const rect = canvasRef.current!.getBoundingClientRect();
+          const cam = cameraRef.current;
+          const { wx: wx0, wy: wy0 } = screenToWorld(
+            midX - rect.left,
+            midY - rect.top,
+            cam,
+            rect.width,
+            rect.height,
+          );
+          cam.zoom = clampZoom(cam.zoom * factor);
+          const { wx: wx1, wy: wy1 } = screenToWorld(
+            midX - rect.left,
+            midY - rect.top,
+            cam,
+            rect.width,
+            rect.height,
+          );
+          cam.x += wx0 - wx1;
+          cam.y += wy0 - wy1;
+          dirtyRef.current = true;
+        }
+      },
+      [buildAtScreenPos, cancelLongPress],
+    );
 
     const onTouchEnd = useCallback(
       (e: React.TouchEvent) => {
+        cancelLongPress();
+        // End any active build-drag. If a finger remains, resume panning with it;
+        // a build gesture is never treated as a tap.
+        if (buildDragRef.current.active) {
+          buildDragRef.current.active = false;
+          buildDragRef.current.visited.clear();
+          panRef.current.dragging = false;
+          if (e.touches.length === 1) {
+            const t = e.touches[0];
+            panRef.current = {
+              dragging: true,
+              lastX: t.clientX,
+              lastY: t.clientY,
+              moved: false,
+            };
+          }
+          return;
+        }
         if (e.touches.length === 0) {
           const pan = panRef.current;
           if (pan.dragging && !pan.moved) {
@@ -590,8 +787,17 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
           };
         }
       },
-      [onTap],
+      [onTap, cancelLongPress],
     );
+
+    // System-interrupted gesture: drop everything cleanly (no phantom tap or stuck build).
+    const onTouchCancel = useCallback(() => {
+      cancelLongPress();
+      buildDragRef.current.active = false;
+      buildDragRef.current.visited.clear();
+      panRef.current.dragging = false;
+      pinchRef.current.active = false;
+    }, [cancelLongPress]);
 
     return (
       <canvas
@@ -610,6 +816,7 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchCancel}
       />
     );
   },
@@ -617,4 +824,67 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
 
 function touchDist(a: React.Touch, b: React.Touch): number {
   return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+}
+
+// Spawn a falling-leaf particle at a shed cell's world position, with a little randomized
+// drift, spin, and lifetime so a canopy drop scatters naturally rather than dropping in a
+// rigid sheet. Coloured by the cell so a fruit/flower falls in its own hue.
+function spawnParticle(cell: Cell, now: number): LeafParticle {
+  const { x, y } = hexToPixel(cell.q, cell.r, BASE_RADIUS);
+  return {
+    x,
+    y,
+    vx: (Math.random() - 0.5) * 0.02,
+    vy: 0.008 + Math.random() * 0.012,
+    rot: Math.random() * Math.PI * 2,
+    vrot: (Math.random() - 0.5) * 0.006,
+    phase: Math.random() * Math.PI * 2,
+    born: now,
+    life: 1100 + Math.random() * 700,
+    color: cellColor(cell),
+    size: BASE_RADIUS * 0.5,
+  };
+}
+
+// Advance and draw the falling-leaf particles, removing any that have expired. Mutates the
+// array in place (splicing dead ones). Particles fall under gravity with a gentle sine
+// flutter and fade out over the back 40% of their life.
+function drawParticles(
+  ctx: CanvasRenderingContext2D,
+  list: LeafParticle[],
+  now: number,
+  dt: number,
+  cam: Camera,
+  width: number,
+  height: number,
+): void {
+  for (let i = list.length - 1; i >= 0; i--) {
+    const p = list[i];
+    const age = now - p.born;
+    if (age >= p.life) {
+      list.splice(i, 1);
+      continue;
+    }
+    p.vy += PARTICLE_GRAVITY * dt;
+    p.x += p.vx * dt + Math.sin(age * 0.006 + p.phase) * 0.004 * dt; // flutter
+    p.y += p.vy * dt;
+    p.rot += p.vrot * dt;
+
+    const { sx, sy } = worldToScreen(p.x, p.y, cam, width, height);
+    if (sx < -20 || sx > width + 20 || sy < -20 || sy > height + 20) continue;
+
+    const fadeStart = p.life * 0.6;
+    const fade =
+      age > fadeStart ? 1 - (age - fadeStart) / (p.life - fadeStart) : 1;
+    const s = p.size * cam.zoom;
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.rotate(p.rot);
+    ctx.globalAlpha = Math.max(0, fade);
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, s * 0.7, s * 0.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
 }

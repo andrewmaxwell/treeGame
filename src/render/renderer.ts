@@ -14,6 +14,29 @@ const OVERLAY_LIVING: ReadonlySet<Cell["type"]> = new Set<Cell["type"]>([
 
 export const BASE_RADIUS = 14; // world pixels per hex at zoom=1
 
+// Playback animation inputs (render-only; the sim stays pure). `bornAt` maps a cell key to
+// the timestamp it first appeared on screen, driving a grow-in "pop"; `shimmer` enables the
+// subtle living-canopy leaf shimmer. Null outside animated frames so a plain redraw (e.g. a
+// camera-only pan) skips the per-cell animation work entirely.
+export interface SceneAnim {
+  now: number;
+  bornAt: Map<string, number>;
+  shimmer: boolean;
+}
+
+// Grow-in pop duration (ms). Exported so the GameCanvas animation driver keeps the same
+// window when it decides how long to keep redrawing after new growth appears.
+export const GROW_MS = 320;
+
+// Scale a freshly-born cell's radius over its grow-in: an ease-out-back that rises from a
+// small seed, overshoots ~10%, and settles to 1.0 — the little "pop" as a cell appears.
+function popScale(t: number): number {
+  const c1 = 2.2;
+  const c3 = c1 + 1;
+  const u = t - 1;
+  return Math.max(0.25, 1 + c3 * u * u * u + c1 * u * u);
+}
+
 // For each neighbor direction i in HEX_NEIGHBORS, the index of the hex edge that
 // faces that neighbor. Edge e spans vertices e and (e+1)%6.
 // In canvas (+y = down), vertex angles (π/3*i + π/6) point:
@@ -47,6 +70,8 @@ export function drawScene(
   stress: Map<string, number>,
   // Resource-flow overlay: recolour cells by water/energy fullness when not 'none'.
   overlay: ResourceOverlay,
+  // Playback animation state (grow-in pop + leaf shimmer), or null for a plain redraw.
+  anim: SceneAnim | null,
 ): void {
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = "#1a1a2e";
@@ -113,6 +138,15 @@ export function drawScene(
   // ── Pass 2: real game cells ────────────────────────────────────────────────
   for (const { cell, sx, sy } of treeCells) {
     const key = hexKey(cell.q, cell.r);
+    // Grow-in pop: a just-appeared cell scales up from a seed to full size.
+    let dr = r;
+    if (anim !== null) {
+      const born = anim.bornAt.get(key);
+      if (born !== undefined) {
+        const t = (anim.now - born) / GROW_MS;
+        if (t < 1) dr = r * popScale(t);
+      }
+    }
     if (overlay !== "none" && OVERLAY_LIVING.has(cell.type)) {
       // Resource view: recolour by fullness; suppress stress/sun glyphs to keep it clean.
       const level =
@@ -123,7 +157,7 @@ export function drawScene(
         ctx,
         sx,
         sy,
-        r,
+        dr,
         overlayColor(level, overlay),
         "rgba(255,255,255,0.55)",
         1.5,
@@ -133,14 +167,24 @@ export function drawScene(
         ctx,
         sx,
         sy,
-        r,
+        dr,
         cellColor(cell),
         "rgba(255,255,255,0.55)",
         1.5,
       );
-      drawStressTint(ctx, sx, sy, r, stress.get(key));
+      drawStressTint(ctx, sx, sy, dr, stress.get(key));
+      // Subtle living-canopy shimmer during playback — a gentle per-leaf brightening that
+      // ripples across the canopy so the season animation reads as alive, not static.
+      if (
+        anim !== null &&
+        anim.shimmer &&
+        cell.type === "leaf" &&
+        dr >= RECT_HEX_R
+      ) {
+        drawLeafShimmer(ctx, sx, sy, dr, anim.now, cell.q, cell.r);
+      }
       if (cell.type === "leaf" && leafLight.has(key)) {
-        drawLeafSun(ctx, sx, sy, r, leafLight.get(key)!);
+        drawLeafSun(ctx, sx, sy, dr, leafLight.get(key)!);
       }
     }
   }
@@ -425,6 +469,28 @@ function drawLeafSun(
   // disc
   ctx.beginPath();
   ctx.arc(x, y, disc, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+// A gentle per-leaf shimmer: a soft light-green wash whose strength rides a sine wave
+// phased by the leaf's (q, r), so brightness ripples across the canopy over time rather
+// than pulsing in unison. Squared so it spends most of the cycle near-invisible and only
+// briefly catches the light. Cheap (one extra fill, only on the lit half of the wave).
+function drawLeafShimmer(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  r: number,
+  now: number,
+  q: number,
+  rr: number,
+): void {
+  const ph = Math.sin(now * 0.004 + q * 0.9 + rr * 1.7);
+  if (ph <= 0) return;
+  ctx.save();
+  hexPath(ctx, cx, cy, r);
+  ctx.fillStyle = `rgba(205,255,205,${ph * ph * 0.09})`;
   ctx.fill();
   ctx.restore();
 }

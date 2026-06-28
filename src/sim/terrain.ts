@@ -46,8 +46,24 @@ const ROCK_STEEPNESS = 0.125; // how sharply density ramps with depth
 const rockProbability = (depth: number): number =>
   ROCK_MAX / (1 + Math.exp(-ROCK_STEEPNESS * (depth - ROCK_MID_DEPTH)));
 
+// Ground water: very rare, scattered, INFINITE-supply pockets (the GROUND_WATER_CAP sentinel)
+// that reward steering roots DEEP through the rock — a drought-proof supply you have to commit
+// to navigate to. Density is zero above GW_MIN_DEPTH, then ramps up very gently with depth
+// (logistic); GW_MID_DEPTH sits well below normal reach, so at realistic depths the curve is
+// in its low tail and pockets stay a genuine jackpot (a fraction of a percent — see the
+// terrain test): ~0.1% at depth 25, ~0.3% at 35, ~0.4% at 40, only approaching the 1.5%
+// asymptote at extreme depth. The deep water-table regen (see updateSoil) is the reliable
+// FLOOR; these are the high-value jackpots on top of it. Uses an independent hash channel
+// (seed 3) so placement is uncorrelated with rock (seed 1) and soil moisture (seed 2).
+const GW_MIN_DEPTH = 25; // no ground water shallower than this
+const GW_MAX = 0.015; // asymptotic density (very rare — one tap is a big, drought-proof reward)
+const GW_MID_DEPTH = 50; // depth at which density reaches half of GW_MAX (below normal reach)
+const GW_STEEPNESS = 0.1; // gentle ramp so the deep end is a findable-but-rare prize
+
 const groundWaterProbability = (depth: number): number =>
-  depth >= 100 ? 0.001 : 0;
+  depth < GW_MIN_DEPTH
+    ? 0
+    : GW_MAX / (1 + Math.exp(-GW_STEEPNESS * (depth - GW_MID_DEPTH)));
 
 // Lazily generates terrain cells on demand.
 // Cells above the surface return null (air).
@@ -69,7 +85,7 @@ export class TerrainGen {
 
     const depth = r - sr;
     const isRock = hash2d(q, r, 1) < rockProbability(depth);
-    const isGroundWater = hash2d(q, r, 1) < groundWaterProbability(depth);
+    const isGroundWater = hash2d(q, r, 3) < groundWaterProbability(depth);
 
     if (isGroundWater) {
       return {

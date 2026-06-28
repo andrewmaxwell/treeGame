@@ -163,6 +163,29 @@ describe("evaluateGoals", () => {
   });
 });
 
+describe("tap-spring (ground water) milestone", () => {
+  const s = surfaceR(0);
+  it("completes when a root grows beside a ground-water pocket", () => {
+    const root = cell(0, s + 20, "tree");
+    const spring = cell(1, s + 20, "ground water");
+    const { progress } = evaluateGoals(
+      fresh,
+      ctx({ cells: cells([root, spring]), livingCells: 2 }),
+    );
+    expect(progress.completed).toContain("tap-spring");
+  });
+
+  it("does NOT complete for a ground-water cell with no adjacent root", () => {
+    const root = cell(0, s + 20, "tree");
+    const spring = cell(5, s + 20, "ground water"); // not adjacent
+    const { progress } = evaluateGoals(
+      fresh,
+      ctx({ cells: cells([root, spring]), livingCells: 2 }),
+    );
+    expect(progress.completed).not.toContain("tap-spring");
+  });
+});
+
 describe("currentGoal / completedMilestones", () => {
   it("currentGoal returns the first uncompleted milestone", () => {
     expect(currentGoal(fresh)!.id).toBe(MILESTONES[0].id);

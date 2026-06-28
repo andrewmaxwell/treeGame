@@ -257,6 +257,8 @@ export function App() {
     storms: StormBreak[];
     nextStorm: number; // index of the next storm break not yet highlighted
     pauseUntil: number; // performance.now() deadline; playback holds for a beat on a break
+    finishing: boolean; // reached the last frame; finish on the NEXT step so the canvas can
+    // diff+animate that final transition (e.g. the autumn leaf-drop) while still "playing"
   } | null>(null);
 
   const finishPlayback = useCallback((finalState: GameState) => {
@@ -351,6 +353,7 @@ export function App() {
     setIsPlaying(false);
     setProgress(0);
     setPlayStats(null);
+    canvasRef.current?.setPlaying(false); // stop playback animations (pop/shimmer/leaf-fall)
     canvasRef.current?.requestDraw();
   }, []);
 
@@ -392,8 +395,15 @@ export function App() {
         }
 
         if (!paused && pb.frameIdx >= pb.frames.length - 1) {
-          finishPlayback(pb.frames[pb.frames.length - 1]);
-          return;
+          // The last frame carries the end-of-season resolution (autumn drop / fruit set),
+          // so its transition is where leaves fall. Render it for one more step (with
+          // playback still active) so the canvas diffs it and spawns the leaf-fall, THEN
+          // finish — otherwise finishPlayback flips playback off before that diff runs.
+          if (pb.finishing) {
+            finishPlayback(pb.frames[pb.frames.length - 1]);
+            return;
+          }
+          pb.finishing = true;
         }
       }
 
@@ -412,9 +422,11 @@ export function App() {
         storms,
         nextStorm: 0,
         pauseUntil: 0,
+        finishing: false,
       };
       playbackRef.current = pb;
       gameRef.current = frames[0];
+      canvasRef.current?.setPlaying(true); // enable animations before the first frame draws
       canvasRef.current?.requestDraw();
       setStormFlash(null);
       setIsPlaying(true);

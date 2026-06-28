@@ -119,18 +119,18 @@ Their appearance and behavior are emergent from position, connectivity, and clus
 not from a named subtype. A tree cell below the ground surface behaves as a root
 (absorbs water from adjacent soil); above ground it behaves as wood.
 
-| Type                | Description                                                                                                                                             |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `'tree'`            | Any living woody cell (trunk, branch, root — identical in data)                                                                                         |
-| `'leaf'`            | Leaf cluster; photosynthesizes, transpires, terminal (nothing grows from it)                                                                            |
-| `'flower'`          | Flower bud; spring only; terminal; becomes fruit if sustained                                                                                           |
-| `'fruit'`           | Maturing fruit; terminal; +1 seed score if it survives to ripeness                                                                                      |
-| `'deadwood'`        | Dead woody cell; still structural, minor capillary water flow                                                                                           |
-| `'reinforced wood'` | Stronger wood (½ moment/stress) but higher water upkeep and no leaves/flowers. Placeable via "Reinforce" mode (2⚡) once the 30-cell milestone unlocks. |
-| `'soil'`            | Underground non-tree cell; holds moisture                                                                                                               |
-| `'rock'`            | Impenetrable; roots cannot pass through; no water flow                                                                                                  |
-| `'ground water'`    | ⚠️ **Experimental, currently unreachable** — infinite water source (`GROUND_WATER_CAP = 200` sentinel). See "In-Progress / Experimental Features".      |
-| (absent)            | Air — empty above-ground cells are simply not stored                                                                                                    |
+| Type                | Description                                                                                                                                                                                                   |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `'tree'`            | Any living woody cell (trunk, branch, root — identical in data)                                                                                                                                               |
+| `'leaf'`            | Leaf cluster; photosynthesizes, transpires, terminal (nothing grows from it)                                                                                                                                  |
+| `'flower'`          | Flower bud; spring only; terminal; becomes fruit if sustained                                                                                                                                                 |
+| `'fruit'`           | Maturing fruit; terminal; +1 seed score if it survives to ripeness                                                                                                                                            |
+| `'deadwood'`        | Dead woody cell; still structural, minor capillary water flow                                                                                                                                                 |
+| `'reinforced wood'` | Stronger wood (½ moment/stress) but higher water upkeep and no leaves/flowers. Placeable via "Reinforce" mode (2⚡) once the 30-cell milestone unlocks.                                                       |
+| `'soil'`            | Underground non-tree cell; holds moisture                                                                                                                                                                     |
+| `'rock'`            | Impenetrable; roots cannot pass through; no water flow                                                                                                                                                        |
+| `'ground water'`    | Rare deep **infinite** water pocket (`GROUND_WATER_CAP = 200` sentinel); a root beside one drinks to cap each tick without depleting it. A navigation reward — see "Soil depth and rocks" and "Ground water". |
+| (absent)            | Air — empty above-ground cells are simply not stored                                                                                                                                                          |
 
 **Terminal cells**: leaves, flowers, and fruit are terminal — no cell may be placed
 attached only to them. New growth must attach to a `'tree'` cell (staged or real).
@@ -424,6 +424,22 @@ the whole run. The seed spawns at the center surface.
   unchanged (avg over a 0–32 soil column ≈ 0.18, matching the old bands) — only the gradient
   changed, so the player can always push a bit deeper before hitting an impenetrable wall.
 - Rocks are scattered individual cells (occasionally small clumps), generated lazily
+- **Ground water** (`'ground water'`): **very rare**, scattered, **infinite-supply** pockets
+  deep in the rock — the high-value deep-root jackpot. Density (`groundWaterProbability` in
+  `sim/terrain.ts`) is **0 above depth `GW_MIN_DEPTH` = 25**, then ramps up very gently and
+  logistically (`GW_MAX = 0.015`, `GW_MID_DEPTH = 50`, `GW_STEEPNESS = 0.1`). `GW_MID_DEPTH`
+  sits well below normal reach, so at realistic depths the curve is in its low tail and pockets
+  stay a fraction of a percent: ~0.15% at depth 25–29, ~0.3% at 35–39, ~0.46% at 40–44 (only
+  approaching the 1.5% asymptote at extreme depth). Finding one therefore demands a genuinely
+  deep, wide root commitment (a 30-cell root mat at depth ~32 hits one ~7% of the time; ~19%
+  with a 40-wide mat at depth 40, through heavy rock). Uses an **independent hash channel
+  (seed 3)** so placement is uncorrelated with rock (seed 1) / soil moisture (seed 2). A root
+  beside one drinks up to its inflow cap (2/tick) every tick forever without depleting the
+  source (`absorbWater`), making that root zone drought-proof — see the `'ground water'` cell
+  entry and "Ground water" under Shipped cell types. The deep water table below is the reliable
+  **floor** (always rewards normal deep digging); ground water is the **jackpot** layered on
+  top (the "jackpot + floor" model). The `tap-spring` milestone credits the first root grown
+  beside one.
 
 ### Soil moisture
 
@@ -434,8 +450,11 @@ the whole run. The seed spawns at the center surface.
   emergent from rain landing on top; add a slight downward bias (+0.02) if needed
 - Evaporation from the top 2 soil rows: 0.05/tick in summer, 0.01/tick otherwise
   (×1.5 during a drought)
-- **Water table**: soil cells at depth ≥ 18 regenerate 0.1 water/tick passively.
-  Deep roots are always rewarded — this is the payoff for navigating the rocks.
+- **Water table**: soil cells at depth ≥ 18 regenerate 0.1 water/tick passively (cap
+  `SOIL_WATER_CAP` = 20). Deep roots are always rewarded — this is the reliable **floor**
+  payoff for navigating the rocks (the rarer ground-water pockets are the jackpot on top).
+  Restored to this design value once ground water shipped; it had been temporarily nerfed to
+  0.01/tick + half-cap as a placeholder.
 - Starting soil moisture: ~8 units average, slightly higher near the spawn point
 
 ---
@@ -838,16 +857,17 @@ to beat next run.
 7. Grow your first flower
 8. Mature your first fruit — your first seed!
 9. Tap the deep water table (root at depth ≥ 18)
-10. Survive a drought
-11. Survive a storm without losing a single cell
-12. Produce 5 seeds in one year
-13. Reach 100 cells
-14. Carry a fruit through a drought summer
-15. Produce 25 lifetime seeds
-16. Produce 10 seeds in one year
-17. Keep your tree alive into its 10th year (longevity — the explicit late-game question)
-18. Grow to 200 cells
-19. Produce 100 lifetime seeds
+10. Find an underground spring (grow a root beside a ground-water pocket — the rare deep jackpot)
+11. Survive a drought
+12. Survive a storm without losing a single cell
+13. Produce 5 seeds in one year
+14. Reach 100 cells
+15. Carry a fruit through a drought summer
+16. Produce 25 lifetime seeds
+17. Produce 10 seeds in one year
+18. Keep your tree alive into its 10th year (longevity — the explicit late-game question)
+19. Grow to 200 cells
+20. Produce 100 lifetime seeds
     ... keep generating; milestones never run out
     (The former "recover from rot" milestone is shelved with rot — see Decisions Deferred.)
 
@@ -990,13 +1010,16 @@ feeds into that answer.
 
 ## Known UX gaps (backlog — from playtest feedback, not yet built)
 
-- **Drag-to-stage — desktop built, mobile pending.** Holding **Shift** and dragging the
-  mouse now stages every valid cell the cursor passes over in one gesture (`buildDragRef` in
+- **Drag-to-stage — desktop and mobile built.** Holding **Shift** and dragging the mouse
+  stages every valid cell the cursor passes over in one gesture (`buildDragRef` in
   `game/GameCanvas.tsx`, shares the tap-to-stage validity rules via a `visited` set). This
-  cured the "clicking cell by cell is death" complaint on desktop. **Still missing: the touch
-  equivalent** — a long-press-then-drag on mobile (the touch handlers only pan/pinch/tap;
-  there is no build-drag path). Add a long-press timer that flips a single-touch drag into
-  build mode so mobile gets the same one-gesture branch planting.
+  cured the "clicking cell by cell is death" complaint on desktop. **Mobile now has the
+  equivalent**: a single-finger **long-press** (`LONG_PRESS_MS` = 350 ms, held still within
+  `LONG_PRESS_MOVE_CANCEL` = 10 px) flips that touch into build mode (`navigator.vibrate`
+  haptic confirmation), then dragging stages every valid cell passed over — reusing the same
+  `buildDragRef`/`buildAtScreenPos`/`visited` path as desktop. Moving before the timer fires
+  cancels it (it's a pan/swipe); a second finger cancels it (pinch-zoom); `touchcancel` and
+  `touchend` tear it down cleanly (a build gesture is never treated as a tap).
 - **Performance (partially addressed).** Profiled the large-tree slowdown a playtester
   reported as "the more cells I place, the slower it goes" (`src/cli/perf.ts` for the headless
   sim/recompute timings; a Playwright pan-FPS harness for the in-browser render loop). Found
@@ -1056,23 +1079,31 @@ feeds into that answer.
   root system (deep roots at the wet water table are darkest). Players read it as "roots
   darken the soil." A proper fix simulates/renders a consistent soil-moisture field (or
   blends the promoted region into the default). Not a gameplay bug.
-- **Playback reads as static.** During the 60-tick season animation the only obvious
-  change is the progress bar; per-tick water/energy colour shifts are too subtle to
-  notice. _Partially addressed:_ the HUD now shows live total 💧 water / ⚡ energy during
-  playback (so absorption/usage is legible as numbers). Still wanted: grow-in pop for new
-  cells, a water/energy pulse up the trunk, leaf shimmer, a falling-leaf autumn-drop anim.
+- **Playback reads as static.** _Mostly addressed (playback animations)._ The HUD shows live
+  total 💧 water / ⚡ energy during playback, and the canvas now animates the season: a
+  **grow-in pop** as new wood/leaves appear (ease-out-back scale-up), a **falling-leaf**
+  particle drop when leaves/flowers/fruit are shed (autumn drop, storm loss — capped, drifting
+  - fluttering world-space particles), and a subtle **leaf shimmer** (a per-leaf light-green
+    ripple) so the canopy reads as alive mid-season. All render-only — the sim stays pure; driven
+    by diffing consecutive displayed frames (births → pop, deaths → particles) plus `performance.now()`.
+    See `render/renderer.ts` (`SceneAnim`, `GROW_MS`, `popScale`, `drawLeafShimmer`) and the
+    animation driver in `game/GameCanvas.tsx` (`animRef`, `spawnParticle`, `drawParticles`;
+    `GameCanvas.setPlaying` from `App` start/finishPlayback gates it). During playback the loop
+    redraws at full rAF (not just per tick) for smooth shimmer/pops. **Still wanted:** the
+    water/energy **pulse up the trunk** (deferred — the fiddliest of the four; a moving
+    height-banded highlight or true flow viz).
 - **Camera doesn't follow growth.** CLAUDE.md specifies a gentle drift to keep new
   growth in frame unless the player has manually panned recently; not implemented. The
   initial camera now fits the loaded tree's bounding box (`makeCamera` in `GameCanvas`),
   but it does not re-frame as the tree grows during a run.
 - **Minimap** (corner overview once the tree exceeds ~1.5× viewport) — specified, not built.
 
-## In-Progress / Experimental Features (branch `0.0.2`, "Quality of Life Improvements")
+## Shipped cell types (formerly `0.0.2` "Quality of Life" scaffolding)
 
-Two new `CellType`s were added on the `0.0.2` branch with most of their simulation
-plumbing in place. **`'reinforced wood'` is now reachable in play** (see below);
-**`'ground water'` is still unreachable scaffolding** (BACKLOG.md "Infinite water stores").
-Documented here so we don't mistake the inert handlers for working features.
+Two new `CellType`s were added on the `0.0.2` branch with their simulation plumbing in place
+but unreachable in play. **Both now ship and are reachable**: `'reinforced wood'` (see below)
+and `'ground water'` (the deep infinite pocket — see below). Kept here as the record of how
+they were finished and the constants that drive them.
 
 ### `'reinforced wood'` — stronger wood (✅ now placeable)
 
@@ -1092,29 +1123,39 @@ Documented here so we don't mistake the inert handlers for working features.
 - **Not yet driven (future polish):** the 2⚡ cost and 30-cell unlock gate are un-tuned against
   the harness; the placement-hint colour doesn't distinguish reinforced from normal wood.
 
-### `'ground water'` — infinite water source (currently UNREACHABLE)
+### `'ground water'` — deep infinite water pocket (✅ now reachable)
 
 - **Intent:** a deep, effectively infinite water reservoir that rewards creative deep-root
-  growth (the "Infinite water stores" backlog item), replacing the passive water-table regen.
-- **What's wired up:** `GROUND_WATER_CAP = 200` is stored in the cell's `water` field as a
-  **sentinel** (NOT `Infinity` — `JSON.stringify(Infinity)` serializes to `null` and would
+  growth (the "Infinite water stores" backlog item). Shipped as the **"jackpot + floor"**
+  model: rare ground-water pockets are the jackpot, the deep water-table regen is the floor —
+  it does **not** replace the table (a player who digs straight down but misses the scattered
+  pockets still gets the table payoff).
+- **What's wired up (sim):** `GROUND_WATER_CAP = 200` is stored in the cell's `water` field as
+  a **sentinel** (NOT `Infinity` — `JSON.stringify(Infinity)` serializes to `null` and would
   corrupt saves). In the sim it reads as an infinite source: `diffuseWater` overrides
   `get`/`capacity`/`budget` for it, it never receives water (`recv.type === 'ground water'`
   is skipped), and `absorbWater` lets an adjacent root fill to cap each tick without
   depleting it. Root absorption, `buildWork` soil pre-expansion, and color all handle it.
-- **What's MISSING (why it's inert):** `groundWaterProbability` only returns non-zero at
-  `depth >= 100`, far below the ~28–35-cell soil column — a root can't reach it. To make it
-  real: lower the spawn depth into reachable terrain (and re-tune, since it's infinite).
+- **Placement (added):** `groundWaterProbability` now ramps from depth `GW_MIN_DEPTH` = 25
+  (see "Soil depth and rocks" for the curve + density/reachability numbers — kept very rare,
+  a fraction of a percent even deep), on an independent hash channel. Renders as vivid blue
+  (`render/colors.ts`), so once a root reveals nearby terrain it's a visible target to steer
+  toward. The `tap-spring` milestone (`game/goals.ts`) credits the first root grown beside one;
+  `diagnose.ts` reports "Roots tapping ground water".
+- **Validated** in the headless harness: density/reachability sweep (0 above depth 25, rising
+  ~0.15%→~0.57% across depths 25–49; a wide deep root mat finds one only ~7–19% of the time),
+  an end-to-end check (a dry root fills 0.5→10 from a spring while the source holds at 200;
+  milestone fires), and the `play.ts` strategy sweep (balance unchanged: balanced ~19 wins,
+  crawler ~1 dead).
 
-### Water-table reward — temporarily nerfed (`// TODO: Playtest`)
+### Deep water table — restored to the design value (was temporarily nerfed)
 
-The passive deep water-table regen in `updateSoil` was kept (it's the live deep-root reward,
-guarding Milestone 9 "Tap the deep water table") but **significantly weakened** pending the
-`'ground water'` replacement: regen rate **0.1 → 0.01/tick** and cap **`SOIL_WATER_CAP` →
-`SOIL_WATER_CAP / 2`** (20 → 10). At this rate a deep root drains its table cell faster than
-it refills, so the deep-root payoff is currently much smaller than the design intends. Marked
-`// TODO: Playtest` — re-tune (or finish `'ground water'` and remove this) before considering
-the deep-root reward "done".
+The passive deep water-table regen in `updateSoil` (depth ≥ 18) is the **reliable floor**
+beneath the ground-water jackpot. It had been temporarily nerfed (regen 0.1 → 0.01/tick, cap
+`SOIL_WATER_CAP` → `/2`) as a placeholder pending ground water; with ground water now shipped
+as a _complement_ (not a replacement), it's been **restored to the design value: 0.1/tick,
+full `SOIL_WATER_CAP` (20)**. So deep roots are always rewarded (the floor), and the rarer
+ground-water pockets are the high-value targets on top.
 
 ### Build note
 
@@ -1145,14 +1186,12 @@ and `'ground water'` treated as terrain in the inspector). When adding a cell ty
   a new cell type. The flower unlock on "Reach 30 cells" is the existing precedent. Design
   the reward to feel like the milestone "pays off" rather than just recording the
   achievement, without making early milestones feel obligatory to min-max.
-- **Underground aquifer nodes.** An alternative/complement to the diffuse water table: place
-  discrete aquifer pockets underground (procedurally generated, visible as a different soil
-  colour) that regenerate water at a high rate (or are infinite). Finding and tapping one
-  with your roots is a navigational puzzle reward — roots must physically reach it, and the
-  rock density + random layout make paths non-trivial. More interesting than the current
-  uniform depth ≥ 18 water table, which is always reachable by just digging straight down.
-  Pairs well with rock destruction above. The existing water table can remain as a fallback
-  floor; aquifers are the high-value targets.
+- **Underground aquifer nodes.** ✅ **Largely built** as `'ground water'` — see "Shipped cell
+  types" and "Soil depth and rocks". Discrete, procedurally-placed, visibly-distinct (vivid
+  blue) infinite pockets that roots must physically reach through the rock, with the water
+  table kept as the reliable floor beneath them — exactly the "jackpot + floor" design here.
+  _Optional remaining work:_ **clustered** multi-cell aquifers (currently single scattered
+  cells) and a finite high-regen variant distinct from the infinite pockets.
 - **Fauna: birds and canopy disturbance.** Trees that grow above a certain height (≈ 50 cells
   above ground, roughly corresponding to the 50ft comment) attract birds. Birds can displace
   leaves (removing them from a branch, resetting auto-leaf growth for a tick), eat a fruit
@@ -1180,8 +1219,8 @@ and `'ground water'` treated as terrain in the inspector). When adding a cell ty
     wood) but the strategic value comes from routing, so placement matters. Needs
     clarification on exact behaviour — see the message below.
   - _Reinforced branch._ ✅ **Built** as `'reinforced wood'` (2⚡, ½ structural stress) — see
-    "Modes" under Planning Phase and the `'reinforced wood'` entry in In-Progress / Experimental
-    Features. Listed here only for history.
+    "Modes" under Planning Phase and the `'reinforced wood'` entry under Shipped cell types.
+    Listed here only for history.
 - **Horizontal growth limit with annual expansion.** Proposed: cap how far left/right the
   player can place cells, expanding the allowed radius by a fixed amount each year or season.
   Would focus early play on vertical depth and trunk structure before the canopy sprawls.
@@ -1335,7 +1374,14 @@ A pass of playtest-driven UX/balance work (brother's second playthrough):
 - **Save-file diagnostic** (`game/diagnose.ts`) — a dense health report (parasite leaves,
   water supply/demand, wood health, flower-anchor lockout, energy headroom). App logs it to
   the browser console on load and exposes `treegameDiagnose()`; `cli/diagnose.ts` runs it on
-  a saved JSON. The way to share a run as text, not a screenshot.
+  a saved JSON. The way to share a run as text, not a screenshot. **Upgraded post-M11** with:
+  a **vertical profile** (water & health per 4-cell altitude band, top→base) that exposes the
+  trunk-conduction gradient the global min/avg/max hid (a top band much drier than the base is
+  the "can't water the lifted canopy" signature); an **"Avg living health"** headline
+  (healthy / ⚠️ stressed / 🛑 in decline); and a **smarter verdict** that flags "canopy
+  starves with height", a graying canopy, and overall decline, and only calls a tree "healthy"
+  when avg living health ≥ 0.75 — it no longer reports "balanced" on a dying tree. Reinforced
+  wood is counted in the census. Guarded by `game/diagnose.test.ts`.
 - **Winter wood die-off fix** — dry structural wood floors at `WOOD_DRY_HEALTH` (0.5)
   instead of decaying to deadwood; thirst never kills wood (only rot/storms/pruning). Stopped
   big deciduous trees shedding their upper structure to deadwood every winter. Validated in

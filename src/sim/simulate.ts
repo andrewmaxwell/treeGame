@@ -818,8 +818,11 @@ function updateSoil(
     if (depth <= 1) w = Math.max(0, w - evap); // evaporation: top 2 rows
     if (raining && depth <= 3) w = Math.min(SOIL_WATER_CAP, w + RAIN_DEPOSIT); // rain: top 4 rows
 
-    // TODO: Playtest
-    if (depth >= 18) w = Math.min(SOIL_WATER_CAP / 2, w + 0.01); // water table
+    // Deep water table: a modest, reliable FLOOR so digging deep always pays off, even
+    // when you don't hit a (rare) ground-water jackpot. Restored to the design value
+    // (0.1/tick, full cap) now that ground water is the high-value reward layered on top
+    // — the earlier 0.01/tick + half-cap nerf was a placeholder pending that feature.
+    if (depth >= 18) w = Math.min(SOIL_WATER_CAP, w + 0.1); // water table
 
     if (w !== cell.water) work.set(key, { ...cell, water: w });
   }

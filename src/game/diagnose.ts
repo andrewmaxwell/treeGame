@@ -72,13 +72,16 @@ export function diagnoseReport(game: GameState): string {
     roots: Cell[] = [];
   let flowers = 0,
     fruit = 0,
-    deadwood = 0;
+    deadwood = 0,
+    healthSum = 0,
+    healthN = 0;
   for (const c of cells.values()) {
     switch (c.type) {
       case "leaf":
         leaves.push(c);
         break;
       case "tree":
+      case "reinforced wood":
         (isUnderground(c) ? roots : woodAbove).push(c);
         break;
       case "flower":
@@ -89,11 +92,16 @@ export function diagnoseReport(game: GameState): string {
         break;
       case "deadwood":
         deadwood++;
-        break;
+        continue; // dead — don't fold into living-health average
+      default:
+        continue; // soil/rock/etc. — not living tissue
     }
+    healthSum += c.health;
+    healthN++;
   }
   const living =
     leaves.length + woodAbove.length + roots.length + flowers + fruit;
+  const overallHealth = healthN > 0 ? healthSum / healthN : 0;
 
   out.push(
     `\n══ Tree diagnosis — ${game.season} Y${game.year} · score ${game.score} ══\n`,
@@ -103,6 +111,10 @@ export function diagnoseReport(game: GameState): string {
     `${living}  (leaves ${leaves.length}, trunk/branch ${woodAbove.length}, roots ${roots.length}, flowers ${flowers}, fruit ${fruit})`,
   );
   line("Deadwood", `${deadwood}`);
+  line(
+    "Avg living health",
+    `${overallHealth.toFixed(2)}  ${overallHealth >= 0.75 ? "healthy" : overallHealth >= 0.5 ? "⚠️  stressed" : "🛑 in decline"}`,
+  );
 
   // ── Light & the parasite question ───────────────────────────────────────────
   // A leaf nets energy only if  light·intensity·PHOTO_COEFF·heightFactor > its 0.02
@@ -182,6 +194,55 @@ export function diagnoseReport(game: GameState): string {
     `min ${leafWater.min.toFixed(1)}  avg ${leafWater.avg.toFixed(1)}  max ${leafWater.max.toFixed(1)}`,
   );
 
+  // ── Vertical profile (water & health by altitude) ───────────────────────────
+  // The global min/avg/max above hides the gradient that kills tall trees: the base
+  // stays wet and healthy while the lifted canopy starves (the 2-units/tick conduction
+  // cap). Banding above-ground cells by height surfaces that gradient directly — a
+  // top band much drier than the base is the "can't water the canopy" signature.
+  const BAND = 4; // cells per band
+  type Band = { wood: Cell[]; leaf: Cell[] };
+  const bands = new Map<number, Band>();
+  const getBand = (b: number): Band => {
+    let v = bands.get(b);
+    if (!v) {
+      v = { wood: [], leaf: [] };
+      bands.set(b, v);
+    }
+    return v;
+  };
+  const bandIndex = (c: Cell) => Math.floor((surfaceR(c.q) - c.r - 1) / BAND);
+  for (const c of woodAbove) getBand(bandIndex(c)).wood.push(c);
+  for (const c of leaves) getBand(bandIndex(c)).leaf.push(c);
+  const bandsHighToLow = [...bands.keys()].sort((a, b) => b - a);
+  const bandAvgWater = (b: Band | undefined): number => {
+    if (!b) return NaN;
+    const xs = [...b.wood, ...b.leaf];
+    return xs.length ? xs.reduce((s, c) => s + c.water, 0) / xs.length : NaN;
+  };
+  // Compact "n  water  hp" column for one cell kind in a band.
+  const col = (kind: Cell[]): string => {
+    if (kind.length === 0)
+      return `${"·".padStart(4)} ${"—".padStart(5)} ${"—".padStart(4)}`;
+    const w = stats(kind.map((c) => c.water));
+    const h = stats(kind.map((c) => c.health));
+    return `${String(kind.length).padStart(4)} ${w.avg.toFixed(1).padStart(5)} ${h.avg.toFixed(2).padStart(4)}`;
+  };
+  out.push(
+    `\n── Vertical profile (height above ground, ${BAND}-cell bands) ──`,
+  );
+  out.push(
+    `  ${"height".padEnd(8)}${"wood  n  watr  hp".padEnd(20)}${"leaf  n  watr  hp"}`,
+  );
+  if (bandsHighToLow.length === 0) out.push("  (no above-ground cells yet)");
+  for (const b of bandsHighToLow) {
+    const band = getBand(b);
+    const lo = b * BAND + 1,
+      hi = (b + 1) * BAND;
+    out.push(
+      `  ${`${lo}–${hi}`.padEnd(8)}${col(band.wood)}     ${col(band.leaf)}`,
+    );
+  }
+
   // ── Health & the flower lockout ─────────────────────────────────────────────
   const woodSick = woodAbove.filter(
     (c) => c.health < FLOWER_ANCHOR_HEALTH,
@@ -248,10 +309,24 @@ export function diagnoseReport(game: GameState): string {
     if (depth > maxDepth) maxDepth = depth;
     if (depth >= 18) waterTableRoots++;
   }
+  // Roots sitting next to a ground-water pocket — each is a drought-proof, infinite supply.
+  let springRoots = 0;
+  for (const c of roots) {
+    for (const [dq, dr] of HEX_NEIGHBORS) {
+      if (cells.get(hexKey(c.q + dq, c.r + dr))?.type === "ground water") {
+        springRoots++;
+        break;
+      }
+    }
+  }
   out.push(`\n── Roots ──`);
   line(
     "Max depth / water-table roots",
     `${maxDepth} deep · ${waterTableRoots} at the table (≥18)`,
+  );
+  line(
+    "Roots tapping ground water",
+    `${springRoots}  ${springRoots > 0 ? "(infinite supply — drought-proof)" : ""}`,
   );
 
   // ── Structure ───────────────────────────────────────────────────────────────
@@ -269,11 +344,37 @@ export function diagnoseReport(game: GameState): string {
   );
 
   // ── Verdict ─────────────────────────────────────────────────────────────────
+  // Smarter than the old "no flag → balanced": a tree can be quietly dying (canopy
+  // graying, vertical water gradient, low overall health) with none of the four hard
+  // flags tripping. Lead with the health headline and refuse to call it balanced
+  // unless living health is genuinely good.
   out.push(`\n── Verdict ──`);
   const notes: string[] = [];
+  if (overallHealth < 0.5)
+    notes.push(
+      `In decline — average living-cell health is ${overallHealth.toFixed(2)}. The tree is losing tissue; act this season.`,
+    );
   if (demand > 0 && supply < demand)
     notes.push(
       `Under-watered: canopy wants ${demand.toFixed(0)}/tick, trunks cap at ${supply.toFixed(0)}/tick. Thin the canopy or widen trunks.`,
+    );
+  // Vertical water gradient: a top band much drier than the base = canopy lifted past
+  // what the trunk can conduct (the classic tall-tree failure the bands now expose).
+  const topW = bandAvgWater(getBand(bandsHighToLow[0])),
+    baseW = bandAvgWater(getBand(bandsHighToLow[bandsHighToLow.length - 1]));
+  if (
+    bandsHighToLow.length >= 2 &&
+    isFinite(topW) &&
+    isFinite(baseW) &&
+    topW < WOOD_WATER_OK &&
+    baseW > topW + 1.5
+  )
+    notes.push(
+      `Canopy starves with height: water averages ${topW.toFixed(1)} at the top vs ${baseW.toFixed(1)} at the base. Widen the trunk (more conduction) or don't build so tall.`,
+    );
+  if (leaves.length > 0 && leafSick > leaves.length * 0.25)
+    notes.push(
+      `${pct(leafSick, leaves.length)} of leaves are graying (health < 0.5) — starved of water or energy and about to drop.`,
     );
   if (leaves.length > 0 && parasites > leaves.length * 0.25)
     notes.push(
@@ -288,7 +389,11 @@ export function diagnoseReport(game: GameState): string {
       `Energy is capped (${pct(banked, cap)}) — you're wasting income. Spend on flowers (spring) or growth.`,
     );
   if (notes.length === 0)
-    notes.push("No dominant problem flagged — tree looks balanced.");
+    notes.push(
+      overallHealth >= 0.75
+        ? `No dominant problem flagged — tree looks healthy (avg living health ${overallHealth.toFixed(2)}).`
+        : `No single hard flag, but average living health is only ${overallHealth.toFixed(2)} — the tree is stressed. Check the vertical profile and water above.`,
+    );
   notes.forEach((n, i) => out.push(`  ${i + 1}. ${n}`));
   out.push("");
 

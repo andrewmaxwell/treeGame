@@ -1,5 +1,6 @@
 import type { Cell } from "../sim/cells";
 import { surfaceR } from "../sim/terrain";
+import { HEX_NEIGHBORS, hexKey } from "../sim/grid";
 import type { Season, GoalProgress } from "./state";
 
 // Everything a milestone check can look at. Built once per season advance from the
@@ -85,6 +86,25 @@ export const MILESTONES: Milestone[] = [
       for (const cell of c.cells.values()) {
         if (cell.type === "tree" && cell.r - surfaceR(cell.q) >= 18)
           return true;
+      }
+      return false;
+    },
+  },
+  {
+    id: "tap-spring",
+    goal: "Find an underground spring with your roots",
+    log: "Your roots found an underground spring — water without end.",
+    // Ground water is a rare, infinite-supply pocket deep in the rock. A ground-water cell
+    // is only promoted into the live cell map once a root grows beside it, so we credit the
+    // tap when one sits next to wood (the navigation reward for digging deep — see terrain).
+    check: (c) => {
+      for (const cell of c.cells.values()) {
+        if (cell.type !== "ground water") continue;
+        for (const [dq, dr] of HEX_NEIGHBORS) {
+          const n = c.cells.get(hexKey(cell.q + dq, cell.r + dr));
+          if (n && (n.type === "tree" || n.type === "reinforced wood"))
+            return true;
+        }
       }
       return false;
     },
