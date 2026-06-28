@@ -936,6 +936,42 @@ export function ripenFruit(state: GameState): {
 
 // Age every living cell (and deadwood) by one season. Runs once, after the last
 // tick, so a cell committed this season enters its first winter still at age 0.
+// Auto-clear deadwood (QoL — removes the late-game prune chore of clearing dead stubs).
+// Runs once at season end: any deadwood cell with NO living neighbour (no wood/leaf/
+// flower/fruit beside it) is a non-load-bearing dead stub and crumbles. Deadwood that
+// still touches a living cell stays — it may be the base of a living branch. A living
+// branch is therefore never adjacent to a removed cell, so the common case strands
+// nothing; removal still goes through applyBreakage (the shared storm/prune rule) so the
+// rare case is handled correctly — a living branch suspended SOLELY on a multi-cell dead
+// bridge whose middle has only dead neighbours falls when that middle crumbles, exactly
+// as it would in a storm. Pure.
+//
+// (The deferred rot work documents a "no living neighbour for 5 consecutive seasons"
+// linger; we crumble at the first season-end isolation here — for a QoL auto-clear,
+// removing the stub promptly is the point, and deadwood is rare until rot lands.)
+export function crumbleDeadwood(state: GameState): GameState {
+  const isLiving = (t: CellType): boolean =>
+    isLivingWood(t) || t === "leaf" || t === "flower" || t === "fruit";
+  const isolated = new Set<string>();
+  for (const [key, cell] of state.cells) {
+    if (cell.type !== "deadwood") continue;
+    let hasLivingNeighbor = false;
+    for (const [dq, dr] of HEX_NEIGHBORS) {
+      const n = state.cells.get(hexKey(cell.q + dq, cell.r + dr));
+      if (n && isLiving(n.type)) {
+        hasLivingNeighbor = true;
+        break;
+      }
+    }
+    if (!hasLivingNeighbor) isolated.add(key);
+  }
+  if (isolated.size === 0) return state;
+  const removed = applyBreakage(state.cells, isolated);
+  const work = new Map(state.cells);
+  for (const key of removed) work.delete(key);
+  return { ...state, cells: work };
+}
+
 function ageCells(state: GameState): GameState {
   const work = new Map(state.cells);
   for (const [key, cell] of state.cells) {
@@ -1054,6 +1090,8 @@ function simulateRange(
         : frames[frames.length - 1];
     // Spring: surviving flowers pollinate into fruit (the rest drop).
     if (weather.season === "spring") last = setFruit(last);
+    // Isolated dead stubs crumble (auto-clear — saves a manual prune).
+    last = crumbleDeadwood(last);
     last = ageCells(last);
     frames[frames.length - 1] = last;
   }

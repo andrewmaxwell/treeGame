@@ -34,8 +34,11 @@ with real file paths, to stop the two lists drifting apart.
   Touches: `game/diagnose.ts`.
 - **Energy-view polish** — the ⚡ overlay should highlight cells more brightly / legibly.
   Touches: `render/colors.ts`, `render/renderer.ts`. (See also numbered #11 playback animations.)
-- **Auto-clear deadwood** (one-tap or automatic crumble) — trims the late-game prune chore
-  your brother flagged. Pairs with the deferred Rot work (#23), which adds deadwood crumbling.
+- **Auto-clear deadwood** — ✅ **done.** `crumbleDeadwood` (`sim/simulate.ts`) automatically
+  crumbles any deadwood with no living neighbour at season end (a non-load-bearing dead stub),
+  via the shared `applyBreakage` connectivity rule. Trims the late-game prune chore your
+  brother flagged. The deferred Rot work (#23) can later add the 5-season linger. See
+  `CLAUDE.md` "Rot → Auto-clear deadwood".
 
 ## Open question — height incentive / crawlers
 
@@ -56,12 +59,12 @@ keep the wall (current), add an artificial low-canopy penalty (hacky), or build 
    (`"${q},${r}"`) with an integer key if it's a hot path.
    Touches: `sim/simulate.ts` (light/water/energy passes all live here), `render/renderer.ts`.
 
-6. **Rock density gradient** — _Value: Med · Effort: Low_
-   Partially addressed (deep tiers softened — see "Done → Rock gradient (partial)"), but
-   `rockProbability` is **still a step function** (0 / 0.1 / 0.25 / 0.35 / 0.45 by depth band).
-   Replace it with a smooth sigmoid so density rises gradually and the player can always push
-   a bit deeper before hitting a wall. Keep overall rock frequency roughly unchanged.
-   Touches: `sim/terrain.ts`.
+6. **Rock density gradient** — ✅ **done.** `rockProbability` is now a smooth logistic sigmoid
+   (`ROCK_MAX = 0.45`, `ROCK_MID_DEPTH = 20`, `ROCK_STEEPNESS = 0.125` in `sim/terrain.ts`)
+   instead of the old 0/0.1/0.25/0.35/0.45 step function. Density rises continuously from ~3–6%
+   near the surface to the 0.45 deep asymptote (no hard wall), tuned so overall rock frequency
+   is roughly unchanged (avg over a 0–32 soil column ≈ 0.18). See `CLAUDE.md` "Soil depth and
+   rocks".
 
 7. **Rock destruction** — _Value: Med · Effort: Low-Med_
    Spend 20 energy during planning to remove a rock cell, opening it for root growth.
@@ -207,8 +210,7 @@ keep the wall (current), add an artificial low-canopy penalty (hacky), or build 
   in one gesture (`buildDragRef` in `game/GameCanvas.tsx`). **Mobile long-press drag is still
   pending** — tracked under "Next up → Drag-to-stage on mobile" above.
 
-- **Rock gradient (partial)** — ⚠️ Partially done: the deep tiers were softened (an extra
-  25–35 depth band added, deepest density lowered 60% → 45% in `rockProbability`,
-  `sim/terrain.ts`), which eases the "rocks overbearing around 20 feet" complaint. But it's
-  **still a step function**, not the smooth sigmoid the design calls for — the true gradient
-  fix remains open as numbered #6 "Rock density gradient" below.
+- **Rock gradient** — ✅ Done: `rockProbability` (`sim/terrain.ts`) is now a smooth logistic
+  sigmoid instead of a step function, so rock density rises gradually with depth (no hard wall)
+  while keeping overall frequency about the same. Fully addresses the "rocks overbearing around
+  20 feet" complaint. See numbered #6 above and `CLAUDE.md` "Soil depth and rocks".

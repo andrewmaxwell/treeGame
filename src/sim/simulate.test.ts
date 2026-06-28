@@ -20,6 +20,7 @@ import {
   growAutoLeaves,
   autoLeafPreview,
   MIN_LEAF_HEIGHT,
+  crumbleDeadwood,
 } from "./simulate";
 import { mulberry32 } from "./rng";
 import {
@@ -822,5 +823,50 @@ describe("simulateSeason — transpiration suction (tick-order integration)", ()
     expect(leaf).toBeDefined();
     expect(leaf!.type).toBe("leaf");
     expect(leaf!.water).toBeGreaterThan(0);
+  });
+
+  describe("crumbleDeadwood", () => {
+    it("removes a dead stub with no living neighbour", () => {
+      // Root → living trunk, with an isolated deadwood cell floating beside nothing living.
+      const state = makeState([
+        cell(0, 0, 5, "tree"), // root (underground)
+        cell(0, -1, 5, "tree"), // trunk
+        cell(5, -5, 5, "deadwood"), // isolated dead stub, no living neighbour
+      ]);
+      const after = crumbleDeadwood(state);
+      expect(after.cells.has(hexKey(5, -5))).toBe(false);
+      expect(after.cells.has(hexKey(0, -1))).toBe(true);
+    });
+
+    it("keeps deadwood that still touches a living cell (may be load-bearing)", () => {
+      // A living branch hangs off the deadwood: roots → deadwood → living tip.
+      const state = makeState([
+        cell(0, 0, 5, "tree"), // root
+        cell(0, -1, 5, "deadwood"), // dead, but bridges root to the living tip
+        cell(0, -2, 5, "tree"), // living wood above the deadwood
+      ]);
+      const after = crumbleDeadwood(state);
+      expect(after.cells.has(hexKey(0, -1))).toBe(true);
+      expect(after.cells.has(hexKey(0, -2))).toBe(true);
+    });
+
+    it("drops a living branch suspended solely on a crumbling dead bridge", () => {
+      // root → D1(touches root) → D2(only dead neighbours) → D3(touches living tip) → tip.
+      // Only D2 is isolated; removing it strands D3 + the living tip, which applyBreakage
+      // sweeps (the branch was held up only by the dead bridge — it falls, as in a storm).
+      const state = makeState([
+        cell(0, 0, 5, "tree"), // root (anchored)
+        cell(0, -1, 5, "deadwood"), // D1 — touches living root → kept
+        cell(0, -2, 5, "deadwood"), // D2 — only dead neighbours → isolated, removed
+        cell(0, -3, 5, "deadwood"), // D3 — touches living tip → kept this pass…
+        cell(0, -4, 5, "tree"), // living tip, held up only by the dead bridge
+      ]);
+      const after = crumbleDeadwood(state);
+      expect(after.cells.has(hexKey(0, 0))).toBe(true); // root stays
+      expect(after.cells.has(hexKey(0, -1))).toBe(true); // D1 still anchored
+      expect(after.cells.has(hexKey(0, -2))).toBe(false); // isolated middle crumbles
+      expect(after.cells.has(hexKey(0, -3))).toBe(false); // …then stranded → swept
+      expect(after.cells.has(hexKey(0, -4))).toBe(false); // suspended living tip falls
+    });
   });
 });

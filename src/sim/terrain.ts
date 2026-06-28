@@ -34,16 +34,17 @@ function hash2d(q: number, r: number, seed: number): number {
   return (h >>> 0) / 0x100000000;
 }
 
+// Rock density rises smoothly with depth via a logistic curve (no step/wall).
+// Tuned so the deep asymptote and the old band midpoints roughly match the
+// previous step function (depth 10 ≈ 0.10, 20 ≈ 0.22, 30 ≈ 0.34, deep → 0.45),
+// keeping overall rock frequency about the same while the gradient is now
+// continuous — the player can always push a bit deeper before hitting a wall.
+const ROCK_MAX = 0.45; // deep asymptotic density
+const ROCK_MID_DEPTH = 20; // depth at which density reaches half of ROCK_MAX
+const ROCK_STEEPNESS = 0.125; // how sharply density ramps with depth
+
 const rockProbability = (depth: number): number =>
-  depth < 5
-    ? 0
-    : depth < 15
-      ? 0.1
-      : depth < 25
-        ? 0.25
-        : depth < 35
-          ? 0.35
-          : 0.45;
+  ROCK_MAX / (1 + Math.exp(-ROCK_STEEPNESS * (depth - ROCK_MID_DEPTH)));
 
 const groundWaterProbability = (depth: number): number =>
   depth >= 100 ? 0.001 : 0;

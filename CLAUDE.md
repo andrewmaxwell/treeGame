@@ -384,8 +384,23 @@ Each tick, a cell's health moves toward a target at rate 0.01/tick. The target i
 - A cell's rot grows 0.02/tick once infected; at rot = 1.0 the cell becomes deadwood
 - Rot is introduced as a threat starting Year 4 (see difficulty curve): a random
   deadwood or storm-wounded cell becomes the infection site
-- Deadwood with no living neighbors for 5 consecutive seasons crumbles (removed)
+- Deadwood with no living neighbors for 5 consecutive seasons crumbles (removed) — _the
+  5-season linger is a rot-era refinement; see "Auto-clear deadwood" below for the
+  currently-shipped immediate variant_
 - Counterplay is pruning (below): catch it early and it's free; wait and it costs limbs
+
+**Auto-clear deadwood (shipped QoL).** `crumbleDeadwood` (`sim/simulate.ts`) runs once at
+season end (folded into the end-of-season resolution alongside autumn drop / fruit set /
+aging): any deadwood cell with **no living neighbour** (no wood/leaf/flower/fruit beside it)
+is a non-load-bearing dead stub and crumbles immediately. Deadwood touching a living cell
+stays (it may be a branch base), so the common case strands nothing; removal goes through the
+shared `applyBreakage` connectivity rule, so the rare case is handled correctly — a living
+branch suspended _solely_ on a multi-cell dead bridge whose middle has only dead neighbours
+falls when that middle crumbles, exactly as in a storm. This removes the late-game "pile of
+deadwood to prune" chore (the M10 winter-wood fix already stopped manufacturing most of it;
+deadwood stays rare until rot lands). It does **not** yet implement the 5-consecutive-seasons
+linger above — for a QoL auto-clear, removing the stub promptly is the point. Guarded by
+`simulate.test.ts` (`crumbleDeadwood`).
 
 ---
 
@@ -399,15 +414,15 @@ the whole run. The seed spawns at the center surface.
 ### Soil depth and rocks
 
 - Soil extends 28–32 cells below the surface (randomized per run), then solid bedrock
-- Rock density by depth (`rockProbability` in `sim/terrain.ts`): <5 deep = 0%, 5–15 ≈ 10%,
-  15–25 ≈ 25%, 25–35 ≈ 35%, below 35 ≈ 45%.
-  **Backlog (partially addressed):** playtesters found the jump from 10% → 25% at depth 15
-  too abrupt ("rocks become overbearing around 20 feet"). The deep tiers were since softened
-  (an extra 25–35 band was added and the deepest density lowered 60% → 45%), but it is **still
-  a step function** — the requested fix is to replace it with a smooth continuous curve (e.g.
-  sigmoid) so density rises gradually and the player can always push a bit deeper before
-  hitting an impenetrable wall. Calibrate so the overall rock frequency is roughly unchanged —
-  only the gradient changes.
+- Rock density rises **smoothly with depth** via a logistic sigmoid (`rockProbability` in
+  `sim/terrain.ts`): `ROCK_MAX / (1 + exp(-ROCK_STEEPNESS·(depth − ROCK_MID_DEPTH)))` with
+  `ROCK_MAX = 0.45`, `ROCK_MID_DEPTH = 20`, `ROCK_STEEPNESS = 0.125`. Near the surface it's
+  ~3–6%, ramping continuously to the 0.45 deep asymptote (depth 10 ≈ 0.10, 20 ≈ 0.22,
+  30 ≈ 0.35). **This replaced the old step function** (0/0.1/0.25/0.35/0.45 by depth band),
+  which playtesters found too abrupt ("rocks become overbearing around 20 feet" — the
+  10%→25% jump at depth 15). The sigmoid was tuned so overall rock frequency is roughly
+  unchanged (avg over a 0–32 soil column ≈ 0.18, matching the old bands) — only the gradient
+  changed, so the player can always push a bit deeper before hitting an impenetrable wall.
 - Rocks are scattered individual cells (occasionally small clumps), generated lazily
 
 ### Soil moisture
