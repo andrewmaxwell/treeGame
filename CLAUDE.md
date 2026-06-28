@@ -994,6 +994,21 @@ feeds into that answer.
     game/planning/mode object identity (which is reassigned fresh on every real mutation but
     stable across camera moves), so a camera-only redraw reuses the cache. Panning a 10k tree
     is now a flat ~8 ms/120 fps (p95 30.5→10.4 ms, max 39→11 ms).
+  - **`computeStructure` recompute on every planning tap (the build-phase lag).** The cache
+    above makes camera moves free, but each tap reassigns the planning state and so re-runs the
+    overlays — and a LibreWolf (Firefox) profile showed `computeStructure` at ~57% of the
+    build-phase time. It allocated a `hexKey` string and a per-cell `Set` in several
+    O(cells·6) passes (the per-cell strength BFS was the worst). Rewrote it to index every wood
+    cell once into typed arrays + a packed-coord→index `Map` (`packCoord`), build a wood
+    adjacency list once, and run all the graph passes (dist BFS, beam integration,
+    `equalizeLayer`, the strength BFS via a generation-stamped visited array) on integer
+    indices with precomputed per-cell geometry — **zero `hexKey`/`Set` allocation in the hot
+    loops, output byte-identical** (guarded by `structure.test.ts`'s exact stress assertions).
+    `computeStructure` on a 10k tree: ~8.9 → ~2.3 ms (~4×), and near-linear now. `GameCanvas`
+    also builds the real+staged `mergeStaged` map once per recompute and shares it across the
+    leaf-preview / leaf-light / stress passes (was three full-map clones). The dominant
+    remaining per-tap cost is `autoLeafPreview` (the iterative multi-pass canopy fill, shared
+    with the deterministic `growAutoLeaves` sim — deliberately left untouched).
   - **Diffusion allocation during a season advance (the freeze on "Advance Season").** The
     `diffuse` pair-collection — the hottest sim loop (6 neighbours × every cell, every tick) —
     allocated a `"${a}|${b}"` template string + string `Set` per edge and an `[a,b]` tuple per

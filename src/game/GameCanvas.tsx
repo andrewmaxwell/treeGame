@@ -51,16 +51,16 @@ interface GameCanvasProps {
   onTap: (q: number, r: number) => void;
 }
 
-// Light map over the real + staged canopy, for the per-leaf sun indicators. Computed
-// fresh on each (change-driven) planning render — cheap and always reflects staging.
+// Light map over the real + staged canopy, for the per-leaf sun indicators. Takes the
+// already-merged (real + staged) cell map so the per-tap recompute builds that merge once
+// and shares it across the light / leaf-preview / stress computations.
 function computePlanningLight(
   game: GameState,
-  planning: PlanningState,
+  merged: Map<string, Cell>,
 ): Map<string, number> {
-  if (planning.stagedCells.size === 0 && game.cells.size === 0)
-    return EMPTY_LIGHT;
+  if (merged.size === 0) return EMPTY_LIGHT;
   return computeLight(
-    { ...game, cells: mergeStaged(game, planning) },
+    { ...game, cells: merged },
     SEASON_PARAMS[game.season].sunAngleDeg,
   );
 }
@@ -72,12 +72,12 @@ const EMPTY_PREVIEW = new Set<string>();
 // Empty in winter (frost) and during playback (the real leaves are already drawn).
 function computeLeafPreview(
   game: GameState,
-  planning: PlanningState,
+  merged: Map<string, Cell>,
 ): Set<string> {
   if (game.season === "winter") return EMPTY_PREVIEW;
   const p = SEASON_PARAMS[game.season];
   return autoLeafPreview(
-    { ...game, cells: mergeStaged(game, planning) },
+    { ...game, cells: merged },
     p.sunAngleDeg,
     p.intensity,
   );
@@ -300,27 +300,33 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
           let stress: Map<string, number>;
           if (fresh) {
             ({ vp, staged, leafPreview, leafLight, stress } = cache);
-          } else {
-            // During playback (or bulk-prune selection), hide placement highlights
-            const planning = !isPlaying && !pruneModeRef.current;
-            vp =
-              isPlaying || pruneModeRef.current
-                ? EMPTY_VP
-                : getValidPlacements(m, g, p);
-            staged = isPlaying ? EMPTY_STAGED : p.stagedCells;
-            // Auto-leaf preview: where the canopy will grow given the current (real+staged)
-            // wood. Shown only during planning (hidden in playback and bulk-prune).
-            leafPreview = planning ? computeLeafPreview(g, p) : EMPTY_PREVIEW;
-            // During planning, show how much sun each existing leaf receives under the
-            // current season's sun angle, including staged-canopy shading.
-            leafLight = isPlaying ? EMPTY_LIGHT : computePlanningLight(g, p);
-            // Stress preview: real cells during playback (watch it redden under a storm),
-            // real + staged during planning (see new growth's structural cost live).
-            stress = isPlaying
-              ? g.cells.size > 0
+          } else if (isPlaying) {
+            // Playback: no placement/preview overlays; stress over the real cells only
+            // (so it reddens live under a storm).
+            vp = EMPTY_VP;
+            staged = EMPTY_STAGED;
+            leafPreview = EMPTY_PREVIEW;
+            leafLight = EMPTY_LIGHT;
+            stress =
+              g.cells.size > 0
                 ? computeStructure(g.cells).stress
-                : EMPTY_STRESS
-              : computeStructure(mergeStaged(g, p)).stress;
+                : EMPTY_STRESS;
+          } else {
+            // Planning: build the real+staged merge ONCE and share it across the leaf
+            // preview, leaf-sun light, and structural-stress previews.
+            const merged = mergeStaged(g, p);
+            vp = pruneModeRef.current ? EMPTY_VP : getValidPlacements(m, g, p);
+            staged = p.stagedCells;
+            // Auto-leaf preview: where the canopy will grow given the current (real+staged)
+            // wood. Hidden during bulk-prune.
+            leafPreview = pruneModeRef.current
+              ? EMPTY_PREVIEW
+              : computeLeafPreview(g, merged);
+            // How much sun each existing leaf receives under the current season's sun
+            // angle, including staged-canopy shading.
+            leafLight = computePlanningLight(g, merged);
+            // Stress preview over real + staged (see new growth's structural cost live).
+            stress = computeStructure(merged).stress;
             overlayCacheRef.current = {
               g,
               p,

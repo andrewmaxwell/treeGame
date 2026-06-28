@@ -104,9 +104,14 @@ const WIND_AREA: Partial<Record<Cell["type"], number>> = {
   fruit: 0.6,
 };
 
-// Height above this cell's own ground surface (0 underground). Wind's lever-arm.
-function heightAbove(cell: Cell): number {
-  return Math.max(0, surfaceR(cell.q) - cell.r);
+// Pack a hex coordinate into a single integer for the coord→index lookup below. Supports
+// |q|,|r| < COORD_OFF (a 10k-cell tree spans tens of cells); a perfect hash, so the
+// lookup is exact. Lets computeStructure resolve neighbours without allocating "q,r"
+// strings (hexKey) in any of its O(cells·6) passes — the dominant cost on a big tree.
+const COORD_OFF = 1 << 13; // 8192
+const COORD_SPAN = 1 << 14; // 16384
+function packCoord(q: number, r: number): number {
+  return (q + COORD_OFF) * COORD_SPAN + (r + COORD_OFF);
 }
 
 // A cross-section shares its load as a rigid unit. Within each connected group of
@@ -116,66 +121,93 @@ function heightAbove(cell: Cell): number {
 // becoming a funnel that lights up while its identical row-mates stay cold (the reported
 // "random hot cell in a thick trunk" bug). A 1-wide member is one cell per layer, so it
 // is left untouched (a cantilever and a skinny trunk behave exactly as the raw beam
-// integration). Mutates the maps in place.
+// integration). Operates on wood indices via the prebuilt adjacency list; mutates the
+// per-cell arrays in place.
 function equalizeLayer(
-  layer: string[],
-  wood: Map<string, Cell>,
-  maps: Map<string, number>[],
+  layer: number[],
+  adj: number[][],
+  arrays: Float64Array[],
 ): void {
   const inLayer = new Set(layer);
-  const seen = new Set<string>();
+  const seen = new Set<number>();
   for (const start of layer) {
     if (seen.has(start)) continue;
-    const comp: string[] = [];
-    const queue = [start];
+    const comp: number[] = [start];
     seen.add(start);
-    for (let head = 0; head < queue.length; head++) {
-      const k = queue[head];
-      comp.push(k);
-      const c = wood.get(k)!;
-      for (const [dq, dr] of HEX_NEIGHBORS) {
-        const nk = hexKey(c.q + dq, c.r + dr);
-        if (inLayer.has(nk) && !seen.has(nk)) {
-          seen.add(nk);
-          queue.push(nk);
+    for (let head = 0; head < comp.length; head++) {
+      for (const j of adj[comp[head]]) {
+        if (inLayer.has(j) && !seen.has(j)) {
+          seen.add(j);
+          comp.push(j);
         }
       }
     }
     if (comp.length < 2) continue;
-    for (const m of maps) {
+    for (const arr of arrays) {
       let sum = 0;
-      for (const k of comp) sum += m.get(k)!;
+      for (const k of comp) sum += arr[k];
       const avg = sum / comp.length;
-      for (const k of comp) m.set(k, avg);
+      for (const k of comp) arr[k] = avg;
     }
   }
 }
 
 export function computeStructure(cells: Map<string, Cell>): StructureInfo {
-  // Wood-only view: trunk, branches, roots, and deadwood all bear load.
-  const wood = new Map<string, Cell>();
-  for (const [k, c] of cells) if (WOOD.has(c.type)) wood.set(k, c);
-
-  // ── Multi-source BFS from the root system → distance-to-ground for each cell ──
-  const dist = new Map<string, number>();
-  const queue: string[] = [];
-  for (const [k, c] of wood) {
-    if (isUnderground(c)) {
-      dist.set(k, 0);
-      queue.push(k);
-    }
+  // ── Index every wood cell, then do all graph work on integer indices + typed arrays.
+  // No hexKey (string) allocation and no per-cell Set allocation in any pass — both were
+  // the dominant per-tap cost on a large tree (the planning-phase lag). Geometry that the
+  // inner loops reuse (cross-section width, pixel-x, wind height, underground flag) is
+  // precomputed once per cell. ──
+  const K: string[] = []; // original map key per wood index (for the output maps)
+  const Wr: number[] = []; // r per wood index
+  const Wtype: Cell["type"][] = [];
+  const px: number[] = []; // hexPixelX per wood index (gravity lever-arm)
+  const ht: number[] = []; // height above own surface per wood index (wind lever-arm)
+  const under: boolean[] = [];
+  const coordIdx = new Map<number, number>();
+  for (const [k, c] of cells) {
+    if (!WOOD.has(c.type)) continue;
+    const i = K.length;
+    K.push(k);
+    Wr.push(c.r);
+    Wtype.push(c.type);
+    px.push(hexPixelX(c.q, c.r));
+    const sr = surfaceR(c.q);
+    ht.push(Math.max(0, sr - c.r));
+    under.push(c.r >= sr);
+    coordIdx.set(packCoord(c.q, c.r), i);
   }
-  for (let head = 0; head < queue.length; head++) {
-    const k = queue[head];
-    const c = wood.get(k)!;
-    const d = dist.get(k)! + 1;
+  const n = K.length;
+
+  // Wood-neighbour adjacency, built once (the only place neighbour coords are resolved).
+  const adj: number[][] = new Array(n);
+  for (const [, c] of cells) {
+    if (!WOOD.has(c.type)) continue;
+    const i = coordIdx.get(packCoord(c.q, c.r))!;
+    const a: number[] = [];
     for (const [dq, dr] of HEX_NEIGHBORS) {
-      const nk = hexKey(c.q + dq, c.r + dr);
-      if (wood.has(nk) && !dist.has(nk)) {
-        dist.set(nk, d);
-        queue.push(nk);
-      }
+      const j = coordIdx.get(packCoord(c.q + dq, c.r + dr));
+      if (j !== undefined) a.push(j);
     }
+    adj[i] = a;
+  }
+
+  // ── Multi-source BFS from the root system → distance-to-ground (−1 = unreachable). ──
+  const dist = new Int32Array(n).fill(-1);
+  const queue: number[] = [];
+  for (let i = 0; i < n; i++)
+    if (under[i]) {
+      dist[i] = 0;
+      queue.push(i);
+    }
+  for (let head = 0; head < queue.length; head++) {
+    const i = queue[head];
+    const d = dist[i] + 1;
+    for (const j of adj[i])
+      if (dist[j] === -1) {
+        dist[j] = d;
+        queue.push(j);
+      }
   }
 
   // ── Per-cell internal forces, integrated like a discrete beam (dM = V·ds). Each cell
@@ -188,15 +220,13 @@ export function computeStructure(cells: Map<string, Cell>): StructureInfo {
   //     DOWN by Δh in height adds Vw·Δh — so height builds the overturning moment.
   // Moments are signed during accumulation so symmetric loads cancel (a balanced canopy,
   // or the ±x zig-zag of a straight vertical trunk); |M| is taken only at the end. ──
-  const Vg = new Map<string, number>();
-  const Mg = new Map<string, number>();
-  const Vw = new Map<string, number>();
-  const Mw = new Map<string, number>();
-  for (const [k, c] of wood) {
-    Vg.set(k, GRAVITY_WEIGHT[c.type] ?? 1);
-    Mg.set(k, 0);
-    Vw.set(k, isUnderground(c) ? 0 : (WIND_AREA[c.type] ?? 0));
-    Mw.set(k, 0);
+  const Vg = new Float64Array(n);
+  const Mg = new Float64Array(n);
+  const Vw = new Float64Array(n);
+  const Mw = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    Vg[i] = GRAVITY_WEIGHT[Wtype[i]] ?? 1;
+    Vw[i] = under[i] ? 0 : (WIND_AREA[Wtype[i]] ?? 0);
   }
 
   // Hang each leaf/flower/fruit's weight and wind onto one anchoring wood cell — the
@@ -206,31 +236,27 @@ export function computeStructure(cells: Map<string, Cell>): StructureInfo {
   // still catch wind — a sail.)
   for (const [, c] of cells) {
     if (!TERMINAL.has(c.type)) continue;
-    let best: string | null = null;
+    let best = -1;
     let bestDist = Infinity,
       bestR = -Infinity;
     for (const [dq, dr] of HEX_NEIGHBORS) {
-      const nk = hexKey(c.q + dq, c.r + dr);
-      const nc = wood.get(nk);
-      const nd = nc ? dist.get(nk) : undefined;
-      if (nc === undefined || nd === undefined) continue;
-      if (nd < bestDist || (nd === bestDist && nc.r > bestR)) {
-        best = nk;
+      const j = coordIdx.get(packCoord(c.q + dq, c.r + dr));
+      if (j === undefined) continue;
+      const nd = dist[j];
+      if (nd < 0) continue;
+      if (nd < bestDist || (nd === bestDist && Wr[j] > bestR)) {
+        best = j;
         bestDist = nd;
-        bestR = nc.r;
+        bestR = Wr[j];
       }
     }
-    if (best === null) continue;
-    const a = wood.get(best)!;
+    if (best === -1) continue;
     const w = GRAVITY_WEIGHT[c.type] ?? 0;
-    Vg.set(best, Vg.get(best)! + w);
-    Mg.set(
-      best,
-      Mg.get(best)! + w * (hexPixelX(c.q, c.r) - hexPixelX(a.q, a.r)),
-    );
+    Vg[best] += w;
+    Mg[best] += w * (hexPixelX(c.q, c.r) - px[best]);
     const f = WIND_AREA[c.type] ?? 0;
-    Vw.set(best, Vw.get(best)! + f);
-    Mw.set(best, Mw.get(best)! + f * (heightAbove(c) - heightAbove(a)));
+    Vw[best] += f;
+    Mw[best] += f * (Math.max(0, surfaceR(c.q) - c.r) - ht[best]);
   }
 
   // ── Down-accumulation, processed one distance-layer at a time from the canopy down.
@@ -241,40 +267,35 @@ export function computeStructure(cells: Map<string, Cell>): StructureInfo {
   // parent inherits its share of the child's moment PLUS the new moment from the load's
   // shear over the child→parent step — gravity over the horizontal step (Δx), wind over
   // the vertical step (Δh). Roots (distance 0) are anchors — load stops there. ──
-  const byDist = new Map<number, string[]>();
+  const byDist: number[][] = [];
   let maxDist = 0;
-  for (const [k] of wood) {
-    const d = dist.get(k);
-    if (d === undefined) continue;
-    (byDist.get(d) ?? byDist.set(d, []).get(d)!).push(k);
+  for (let i = 0; i < n; i++) {
+    const d = dist[i];
+    if (d < 0) continue;
+    (byDist[d] ??= []).push(i);
     if (d > maxDist) maxDist = d;
   }
   for (let d = maxDist; d >= 1; d--) {
-    const layer = byDist.get(d);
+    const layer = byDist[d];
     if (!layer) continue;
-    equalizeLayer(layer, wood, [Vg, Mg, Vw, Mw]);
-    for (const k of layer) {
-      const c = wood.get(k)!;
-      const cx = hexPixelX(c.q, c.r);
-      const ch = heightAbove(c);
-      const parents: string[] = [];
-      for (const [dq, dr] of HEX_NEIGHBORS) {
-        const nk = hexKey(c.q + dq, c.r + dr);
-        const nd = wood.has(nk) ? dist.get(nk) : undefined;
-        if (nd !== undefined && nd < d) parents.push(nk);
-      }
-      if (parents.length === 0) continue; // disconnected fragment
-      const share = 1 / parents.length;
-      const vg = Vg.get(k)! * share,
-        mg = Mg.get(k)! * share,
-        vw = Vw.get(k)! * share,
-        mw = Mw.get(k)! * share;
-      for (const p of parents) {
-        const pc = wood.get(p)!;
-        Vg.set(p, Vg.get(p)! + vg);
-        Mg.set(p, Mg.get(p)! + mg + vg * (cx - hexPixelX(pc.q, pc.r)));
-        Vw.set(p, Vw.get(p)! + vw);
-        Mw.set(p, Mw.get(p)! + mw + vw * (ch - heightAbove(pc)));
+    equalizeLayer(layer, adj, [Vg, Mg, Vw, Mw]);
+    for (const i of layer) {
+      const cx = px[i];
+      const ch = ht[i];
+      let parentCount = 0;
+      for (const j of adj[i]) if (dist[j] >= 0 && dist[j] < d) parentCount++;
+      if (parentCount === 0) continue; // disconnected fragment
+      const share = 1 / parentCount;
+      const vg = Vg[i] * share,
+        mg = Mg[i] * share,
+        vw = Vw[i] * share,
+        mw = Mw[i] * share;
+      for (const j of adj[i]) {
+        if (!(dist[j] >= 0 && dist[j] < d)) continue;
+        Vg[j] += vg;
+        Mg[j] += mg + vg * (cx - px[j]);
+        Vw[j] += vw;
+        Mw[j] += mw + vw * (ch - ht[j]);
       }
     }
   }
@@ -285,29 +306,35 @@ export function computeStructure(cells: Map<string, Cell>): StructureInfo {
   // cells look "wide" and read as strong — which is correct, because branches don't snap
   // mid-span; their bending moment is borne by the narrow trunk at the junction (where
   // its width is low and its stress therefore high). Min 3 (a lone cell), so stress
-  // never divides by zero.
-  const strength = new Map<string, number>();
-  for (const [k, c] of wood) {
+  // never divides by zero. A generation-stamped visited array avoids a per-cell Set.
+  const strength = new Float64Array(n);
+  const stamp = new Int32Array(n);
+  let gen = 0;
+  let frontier: number[] = [];
+  let next: number[] = [];
+  for (let i = 0; i < n; i++) {
+    gen++;
     let count = 0;
-    const seen = new Set<string>([k]);
-    let frontier = [k];
+    const ri = Wr[i];
+    stamp[i] = gen;
+    frontier.length = 0;
+    frontier.push(i);
     for (let depth = 0; depth <= 2; depth++) {
-      const next: string[] = [];
-      for (const fk of frontier) {
-        const fc = wood.get(fk)!;
-        if (fc.r === c.r) count++;
+      next.length = 0;
+      for (const fi of frontier) {
+        if (Wr[fi] === ri) count++;
         if (depth === 2) continue;
-        for (const [dq, dr] of HEX_NEIGHBORS) {
-          const nk = hexKey(fc.q + dq, fc.r + dr);
-          if (wood.has(nk) && !seen.has(nk)) {
-            seen.add(nk);
-            next.push(nk);
+        for (const j of adj[fi])
+          if (stamp[j] !== gen) {
+            stamp[j] = gen;
+            next.push(j);
           }
-        }
       }
+      const tmp = frontier;
       frontier = next;
+      next = tmp;
     }
-    strength.set(k, count * 3);
+    strength[i] = count * 3;
   }
 
   // ── Moment + stress. Each cell's gravity and wind bending demand (magnitudes of the
@@ -315,19 +342,22 @@ export function computeStructure(cells: Map<string, Cell>): StructureInfo {
   // so a huge balanced canopy on a thin trunk is not completely storm-proof, all divided
   // by its cross-section. ──
   const moment = new Map<string, number>();
+  const strengthMap = new Map<string, number>();
   const stress = new Map<string, number>();
-  for (const [key, cell] of wood) {
-    const gravM = Math.abs(Mg.get(key)!);
-    const windM = Math.abs(Mw.get(key)!);
+  for (let i = 0; i < n; i++) {
+    const gravM = Math.abs(Mg[i]);
+    const windM = Math.abs(Mw[i]);
     const bend = gravM * MOMENT_W + windM * WIND_W;
-    const stressAmt = (bend + Vg.get(key)! * LOAD_W) / strength.get(key)!;
+    const stressAmt = (bend + Vg[i] * LOAD_W) / strength[i];
     const momentAmt = gravM + windM;
-    const reinforced = cell.type === "reinforced wood";
+    const reinforced = Wtype[i] === "reinforced wood";
+    const key = K[i];
     moment.set(key, reinforced ? momentAmt / 2 : momentAmt);
+    strengthMap.set(key, strength[i]);
     stress.set(key, reinforced ? stressAmt / 2 : stressAmt);
   }
 
-  return { moment, strength, stress };
+  return { moment, strength: strengthMap, stress };
 }
 
 // Connectivity after wood is removed (a storm snap or a prune). Given the cells with
