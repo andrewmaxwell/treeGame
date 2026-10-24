@@ -814,7 +814,11 @@ Cell color encodes health and type at a glance:
 | Rock                             | Dark gray `#6B6B6B`                                       |
 
 Stress > 0.8: red disc over the wood joint. Inspected cell: white hex outline.
-Staged cells: 70% opacity hexes + dashed group outline (planning stays on the grid).
+Staged cells: drawn on the tree as pale new growth with a light halo (see below); the
+resource views keep the old 70% hexes + dashed group outline.
+Build spots: underground, a warm dashed hex; above ground, a light dashed hex with a bud
+dot at its centre (the old faint brown outline vanished against the sky); inside the
+canopy (wood replacing a leaf), the bud alone so the canopy isn't covered in grid.
 
 ### The tree drawn as a tree (`render/organic.ts`)
 
@@ -836,6 +840,18 @@ staging and pruning are all still per-hex; only the look changes. The resource o
   between many slightly different fills showed as a lattice over thick trunks. Shading is
   an offset shadow away from the sun, a dark outline, and a lit band on the upper-left edge
   (bark filled light, then refilled nudged down-right and clipped to the wood).
+- **Solid wood between three cells.** Three mutually adjacent wood cells also fill the
+  triangle between their centres. The centroid is r from each centre and 0.5r from each
+  edge, so limbs thinner than half a hex (tips, young roots) left little triangular holes
+  in any fused patch. Triangles take their majority colour, and a limb between cells of
+  different bark is split at its midpoint, each half in its own cell's colour (otherwise
+  trunk-coloured wedges poke into the darker roots).
+- **Planned growth is part of the same tree.** Staged cells and the auto-leaf preview are
+  added to a merged cell map (`withPlanned` in `renderer.ts`, cached on input identity) and
+  drawn with `ghost: true`, so limbs connect to them and the trunk thickens as if the plan
+  had happened. Ghost wood is drawn before the real wood, pale (bark blended toward
+  `#d8c79a`) inside a light halo, so the real bark covers the joints; ghost leaves are the
+  normal clumps at 42% opacity; ghost twigs and blossoms are faded.
 - **Path winding matters.** Everything of one colour goes in one Path2D filled with the
   nonzero rule. `limb()` winds its quad the same way as `arc()`; with the opposite
   winding, overlapping quads and discs cancel into holes.
@@ -851,7 +867,9 @@ staging and pruning are all still per-hex; only the look changes. The resource o
   cover the hex, and without it the sky showed through around roots).
 - The memorial silhouette uses the same drawing.
 - Cost: on the 10k-cell perf tree in Chrome (M4 Mac), `drawScene` went from ~4.3 ms to
-  ~7.0 ms p50 (p95 ~10 ms) at the fitted zoom; zoomed in it is unchanged (~1.9 ms).
+  ~7.5 ms p50 (p95 ~10 ms) at the fitted zoom, planning view; zoomed in it is unchanged
+  (~1.9 ms). Splitting every limb at its midpoint cost +2 ms, so only limbs whose two
+  ends differ in colour are split.
 
 ### Sky, weather and seasons on screen (render-only, `render/sky.ts`)
 

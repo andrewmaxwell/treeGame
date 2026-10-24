@@ -14,6 +14,7 @@ export interface PlacedCell {
   sx: number; // screen centre (already swayed)
   sy: number;
   s: number; // grow-in scale, 1 when settled
+  ghost?: boolean; // planned this turn (staged, or canopy that will auto-grow): drawn pale
 }
 
 const WOOD: ReadonlySet<Cell["type"]> = new Set<Cell["type"]>([
@@ -133,12 +134,16 @@ export function drawOrganicTree(
   const rad = (p: PlacedCell) =>
     woodRadius(topo.size.get(p.key) ?? 1, r, below(p.cell)) * p.s;
 
-  // ── Wood: one path per colour for the bark, one shared outline and highlight ──
-  const outline = new Path2D();
-  const bark = new Map<string, Path2D>();
-  const barkPath = (color: string) => {
-    let p = bark.get(color);
-    if (!p) bark.set(color, (p = new Path2D()));
+  // ── Wood: one path per colour for the bark, one shared outline ──────────────
+  // Planned (ghost) growth goes in its own set of paths so it can be drawn pale.
+  const sets = [false, true].map(() => ({
+    outline: new Path2D(),
+    bark: new Map<string, Path2D>(),
+  }));
+  const barkPath = (ghost: boolean, color: string) => {
+    const m = sets[+ghost].bark;
+    let p = m.get(color);
+    if (!p) m.set(color, (p = new Path2D()));
     return p;
   };
   const edge = 1.2 + r * 0.06;
@@ -146,30 +151,72 @@ export function drawOrganicTree(
     if (!isWood(p.cell)) continue;
     const ra = rad(p);
     const color = barkColor(p.cell);
-    disc(outline, p.sx, p.sy, ra + edge);
-    disc(barkPath(color), p.sx, p.sy, ra);
-    // Each neighbouring pair once: right, lower-right, upper-right.
+    const g = !!p.ghost;
+    disc(sets[+g].outline, p.sx, p.sy, ra + edge);
+    disc(barkPath(g, color), p.sx, p.sy, ra);
+    // Each neighbouring pair once: right, lower-right, upper-right. A limb touching
+    // planned growth is planned too.
     for (const d of [0, 2, 4]) {
       const [dq, dr] = HEX_NEIGHBORS[d];
       const n = at.get(hexKey(p.cell.q + dq, p.cell.r + dr));
       if (!n || !isWood(n.cell)) continue;
       const rb = rad(n);
-      limb(outline, p.sx, p.sy, ra + edge, n.sx, n.sy, rb + edge);
-      limb(barkPath(color), p.sx, p.sy, ra, n.sx, n.sy, rb);
+      const lg = g || !!n.ghost;
+      limb(sets[+lg].outline, p.sx, p.sy, ra + edge, n.sx, n.sy, rb + edge);
+      // Each half of the limb in its own cell's bark, so a colour change (root to trunk,
+      // dying wood) happens midway rather than as a wedge of one colour in the other.
+      const nColor = barkColor(n.cell);
+      if (nColor === color) {
+        limb(barkPath(lg, color), p.sx, p.sy, ra, n.sx, n.sy, rb);
+      } else {
+        const mx = (p.sx + n.sx) / 2;
+        const my = (p.sy + n.sy) / 2;
+        const rm = (ra + rb) / 2;
+        limb(barkPath(lg, color), p.sx, p.sy, ra, mx, my, rm);
+        limb(barkPath(lg, nColor), mx, my, rm, n.sx, n.sy, rb);
+      }
+    }
+    // Three mutually adjacent wood cells are solid wood: fill the triangle between their
+    // centres, which thin limbs (radius < half a hex) leave open. Enumerated from the
+    // left corner: (right, upper-right) and (right, lower-right).
+    const right = at.get(hexKey(p.cell.q + 1, p.cell.r));
+    if (!right || !isWood(right.cell)) continue;
+    for (const third of [
+      at.get(hexKey(p.cell.q + 1, p.cell.r - 1)),
+      at.get(hexKey(p.cell.q, p.cell.r + 1)),
+    ]) {
+      if (!third || !isWood(third.cell)) continue;
+      const tg = g || !!right.ghost || !!third.ghost;
+      const c2 = barkColor(right.cell);
+      const c3 = barkColor(third.cell);
+      tri(barkPath(tg, c2 === c3 ? c2 : color), p, right, third); // majority colour
     }
   }
+
+  // Planned wood first, pale with a light halo, so the real bark covers the joints.
+  const ghost = sets[1];
+  if (ghost.bark.size > 0) {
+    ctx.fillStyle = "rgba(255,250,230,0.75)";
+    ctx.fill(ghost.outline);
+    for (const [color, p] of ghost.bark) {
+      ctx.fillStyle = lerpColor(color, "#d8c79a", 0.55);
+      ctx.fill(p);
+    }
+  }
+
   // A soft shadow on the side away from the sun (upper left), then the outline and bark.
+  const real = sets[0];
   ctx.save();
   ctx.translate(r * 0.12, r * 0.06);
   ctx.fillStyle = "rgba(20,10,0,0.25)";
-  ctx.fill(outline);
+  ctx.fill(real.outline);
   ctx.restore();
   ctx.fillStyle = "rgba(28,16,6,0.55)";
-  ctx.fill(outline);
+  ctx.fill(real.outline);
   // Lit bark first, then the bark again nudged away from the sun and clipped to the wood,
   // leaving a band of light along every limb's upper-left edge.
   const allBark = new Path2D();
-  for (const [color, p] of bark) {
+  for (const [color, p] of real.bark) {
     allBark.addPath(p);
     ctx.fillStyle = lerpColor(color, "#e8c28a", 0.35);
     ctx.fill(p);
@@ -177,7 +224,7 @@ export function drawOrganicTree(
   ctx.save();
   ctx.clip(allBark);
   ctx.translate(r * 0.14, r * 0.08);
-  for (const [color, p] of bark) {
+  for (const [color, p] of real.bark) {
     ctx.fillStyle = color;
     ctx.fill(p);
   }
@@ -195,21 +242,59 @@ export function drawOrganicTree(
   }
 
   // ── Twigs out to leaves, flowers and fruit ──────────────────────────────────
-  ctx.strokeStyle = "rgba(70,45,22,0.9)";
   ctx.lineWidth = Math.max(1, r * 0.1);
   ctx.lineCap = "round";
-  ctx.beginPath();
-  for (const p of placed) {
-    const w = topo.twig.get(p.key);
-    const from = w && at.get(w);
-    if (!from) continue;
-    ctx.moveTo(from.sx, from.sy);
-    ctx.lineTo(p.sx, p.sy);
+  for (const ghost of [false, true]) {
+    ctx.strokeStyle = ghost ? "rgba(90,60,30,0.35)" : "rgba(70,45,22,0.9)";
+    ctx.beginPath();
+    for (const p of placed) {
+      if (!!p.ghost !== ghost) continue;
+      const w = topo.twig.get(p.key);
+      const from = w && at.get(w);
+      if (!from) continue;
+      ctx.moveTo(from.sx, from.sy);
+      ctx.lineTo(p.sx, p.sy);
+    }
+    ctx.stroke();
   }
-  ctx.stroke();
 
-  // ── Canopy: three overlapping discs per leaf, merged into one silhouette ────
+  // ── Canopy: real leaves, then the canopy that will grow, faint ──────────────
   const leaves = placed.filter((p) => p.cell.type === "leaf");
+  drawCanopy(
+    ctx,
+    leaves.filter((p) => !p.ghost),
+    opts,
+    true,
+  );
+  ctx.save();
+  ctx.globalAlpha = 0.42;
+  drawCanopy(
+    ctx,
+    leaves.filter((p) => p.ghost),
+    opts,
+    false,
+  );
+  ctx.restore();
+
+  // ── Blossoms and fruit ──────────────────────────────────────────────────────
+  for (const p of placed) {
+    ctx.globalAlpha = p.ghost ? 0.65 : 1;
+    if (p.cell.type === "flower") drawBlossom(ctx, p, r);
+    else if (p.cell.type === "fruit") drawFruit(ctx, p, r);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// Three overlapping discs per leaf, merged into one silhouette: a drop shadow, fills by
+// colour (light and autumn shift the green), and a highlight toward the sun.
+function drawCanopy(
+  ctx: CanvasRenderingContext2D,
+  leaves: PlacedCell[],
+  opts: OrganicOpts,
+  shadow: boolean,
+): void {
+  if (leaves.length === 0) return;
+  const { r } = opts;
   const shade = new Path2D();
   const light = new Path2D();
   const greens = new Map<string, Path2D>();
@@ -241,8 +326,10 @@ export function drawOrganicTree(
       disc(light, cx - cr * 0.3, cy - cr * 0.35, cr * 0.45);
     }
   }
-  ctx.fillStyle = "rgba(10,35,15,0.45)";
-  ctx.fill(shade);
+  if (shadow) {
+    ctx.fillStyle = "rgba(10,35,15,0.45)";
+    ctx.fill(shade);
+  }
   for (const [color, g] of greens) {
     ctx.fillStyle = color;
     ctx.fill(g);
@@ -260,12 +347,17 @@ export function drawOrganicTree(
       ctx.fill();
     }
   }
+}
 
-  // ── Blossoms and fruit ──────────────────────────────────────────────────────
-  for (const p of placed) {
-    if (p.cell.type === "flower") drawBlossom(ctx, p, r);
-    else if (p.cell.type === "fruit") drawFruit(ctx, p, r);
-  }
+// A triangle between three cell centres, wound like arc() (see limb) so it adds to the
+// fill instead of cancelling.
+function tri(path: Path2D, a: PlacedCell, b: PlacedCell, c: PlacedCell): void {
+  const area = (b.sx - a.sx) * (c.sy - a.sy) - (c.sx - a.sx) * (b.sy - a.sy);
+  const [p, q] = area > 0 ? [b, c] : [c, b];
+  path.moveTo(a.sx, a.sy);
+  path.lineTo(p.sx, p.sy);
+  path.lineTo(q.sx, q.sy);
+  path.closePath();
 }
 
 // Bark comes in a handful of shades so neighbouring limbs share one fill: per-cell tints

@@ -208,12 +208,12 @@ export function drawScene(
     }
     // In the normal view the tree is drawn as limbs and foliage (render/organic.ts);
     // the resource views keep flat hexes because there the cell is the data.
-    if (overlay === "none" && OVERLAY_LIVING.has(cell.type)) {
-      placed.push({ cell, key, sx, sy, s: dr / r });
-      continue;
-    }
-    if (overlay === "none" && cell.type === "deadwood") {
-      placed.push({ cell, key, sx, sy, s: dr / r });
+    if (
+      overlay === "none" &&
+      (OVERLAY_LIVING.has(cell.type) || cell.type === "deadwood")
+    ) {
+      // A staged cell replacing this one is drawn (as planned growth) below instead.
+      if (!stagedCells.has(key)) placed.push({ cell, key, sx, sy, s: dr / r });
       continue;
     }
     // Resource view: recolour living cells by fullness; anything else keeps its colour.
@@ -227,8 +227,26 @@ export function drawScene(
       : cellColor(cell);
     drawFilledHex(ctx, sx, sy, dr, fill, "rgba(255,255,255,0.55)", 1.5);
   }
+  // Planned growth joins the same tree, drawn pale: staged cells, and the canopy that
+  // will leaf out on its own (the auto-leaf preview).
+  let treeCellsMap = cells;
+  if (overlay === "none" && (stagedCells.size > 0 || leafPreview.size > 0)) {
+    treeCellsMap = withPlanned(cells, stagedCells, leafPreview);
+    const margin = r * 2;
+    const addGhost = (cell: Cell, key: string) => {
+      const { x: wx, y: wy } = hexToPixel(cell.q, cell.r, BASE_RADIUS);
+      const { sx, sy } = worldToScreen(wx, wy, camera, width, height);
+      if (sx < -margin || sx > width + margin) return;
+      if (sy < -margin || sy > height + margin) return;
+      placed.push({ cell, key, sx, sy, s: 1, ghost: true });
+    };
+    for (const [key, cell] of stagedCells)
+      if (OVERLAY_LIVING.has(cell.type)) addGhost(cell, key);
+    for (const key of leafPreview)
+      if (!stagedCells.has(key)) addGhost(treeCellsMap.get(key)!, key);
+  }
   if (placed.length > 0) {
-    drawOrganicTree(ctx, placed, cells, {
+    drawOrganicTree(ctx, placed, treeCellsMap, {
       r,
       light: leafLight,
       autumn: env.season === "fall" ? 0.25 + 0.75 * env.seasonT : 0,
@@ -244,24 +262,6 @@ export function drawScene(
         ctx.fill();
       }
     }
-  }
-
-  // ── Pass 2b: auto-leaf preview — faint ghost leaves where the canopy will grow ──
-  if (leafPreview.size > 0 && overlay === "none") {
-    ctx.save();
-    ctx.globalAlpha = 0.45;
-    for (const key of leafPreview) {
-      const p = screenPosForKey(key, camera, width, height);
-      if (!p) continue;
-      ctx.fillStyle = env.season === "fall" ? "#c9893a" : "#5cc060";
-      ctx.strokeStyle = "rgba(200,255,200,0.7)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(p.sx, p.sy, r * 0.7, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-    }
-    ctx.restore();
   }
 
   // ── Pass 3: valid placement highlights ────────────────────────────────────
@@ -281,27 +281,48 @@ export function drawScene(
         continue;
       // Underground wood placements are ROOT spots — over tan soil the faint above-ground
       // hint vanishes, so give roots a higher-contrast warm outline + fill so players see
-      // they can dig down. Flower / above-ground wood keep the subtle dotted hint.
+      // they can dig down. Above ground the spots sit on sky and foliage, so they get a
+      // light dashed hex and a bud at the centre; flower spots the same in pink.
       const underground = vpType === "tree" && vr >= surfaceR(vq);
+      // Spots inside the canopy (wood can replace a leaf) get only the bud: a dashed hex
+      // on every leaf would cover the canopy in grid.
+      const inCanopy = cells.get(key)?.type === "leaf";
       const stroke =
         vpType === "flower"
-          ? "rgba(255,170,176,0.40)"
+          ? "rgba(255,190,200,0.75)"
           : underground
             ? "rgba(255,212,150,0.7)"
-            : "rgba(190,150,100,0.20)";
+            : "rgba(255,248,225,0.6)";
       if (hintPulse > 0) {
         hexPath(ctx, sx, sy, r * (0.86 + 0.06 * hintPulse));
         ctx.fillStyle = `rgba(255,226,150,${0.12 + 0.22 * hintPulse})`;
         ctx.fill();
       }
+      if (inCanopy && r >= RECT_HEX_R) {
+        ctx.fillStyle = "rgba(255,246,220,0.8)";
+        ctx.beginPath();
+        ctx.arc(sx, sy, Math.max(1.5, r * 0.13), 0, Math.PI * 2);
+        ctx.fill();
+        continue;
+      }
       hexPath(ctx, sx, sy, r * 0.92);
       ctx.fillStyle =
         vpType === "flower"
-          ? "rgba(255,170,176,0.08)"
+          ? "rgba(255,170,176,0.12)"
           : underground
             ? "rgba(110,70,30,0.30)"
-            : "rgba(160,115,65,0.04)";
+            : "rgba(255,248,225,0.10)";
       ctx.fill();
+      if (!underground && r >= RECT_HEX_R) {
+        ctx.fillStyle =
+          vpType === "flower"
+            ? "rgba(255,170,190,0.9)"
+            : "rgba(255,246,220,0.85)";
+        ctx.beginPath();
+        ctx.arc(sx, sy, Math.max(1.5, r * 0.14), 0, Math.PI * 2);
+        ctx.fill();
+        hexPath(ctx, sx, sy, r * 0.92); // restore the hex for the dashed stroke
+      }
       ctx.strokeStyle = stroke;
       ctx.lineWidth = Math.max(0.5, camera.zoom);
       ctx.setLineDash([
@@ -313,8 +334,9 @@ export function drawScene(
     }
   }
 
-  // ── Pass 4: staged cells at 70% opacity (half was grey against the sky) ─────
-  if (stagedCells.size > 0) {
+  // ── Pass 4: staged cells as hexes, in the resource views only (the normal view draws
+  // them as pale growth on the tree) ──────────────────────────────────────────────
+  if (stagedCells.size > 0 && overlay !== "none") {
     ctx.save();
     ctx.globalAlpha = 0.7;
     for (const [, cell] of stagedCells) {
@@ -658,4 +680,43 @@ function hexPath(
     else ctx.lineTo(px, py);
   }
   ctx.closePath();
+}
+
+// Real cells plus planned growth (staged cells, and preview leaves as healthy leaf cells),
+// so the organic pass sizes limbs and hangs leaves as if the plan had happened. Cached on
+// the three inputs' identities, which only change when the plan or a frame does.
+let plannedCache: {
+  cells: Map<string, Cell>;
+  staged: Map<string, Cell>;
+  preview: Set<string>;
+  merged: Map<string, Cell>;
+} | null = null;
+function withPlanned(
+  cells: Map<string, Cell>,
+  staged: Map<string, Cell>,
+  preview: Set<string>,
+): Map<string, Cell> {
+  const c = plannedCache;
+  if (c && c.cells === cells && c.staged === staged && c.preview === preview)
+    return c.merged;
+  const merged = new Map(cells);
+  for (const [k, cell] of staged) merged.set(k, cell);
+  for (const k of preview) {
+    if (staged.has(k)) continue;
+    const comma = k.indexOf(",");
+    const q = parseInt(k.slice(0, comma));
+    const r = parseInt(k.slice(comma + 1));
+    merged.set(k, {
+      q,
+      r,
+      type: "leaf",
+      water: CELL_WATER_CAP * 0.6,
+      energy: CELL_ENERGY_CAP * 0.5,
+      health: 1,
+      rot: 0,
+      age: 0,
+    });
+  }
+  plannedCache = { cells, staged, preview, merged };
+  return merged;
 }
