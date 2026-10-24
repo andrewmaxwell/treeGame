@@ -4,6 +4,7 @@ import { surfaceR, type TerrainGen } from "../sim/terrain";
 import { worldToScreen, type Camera } from "./camera";
 import { cellColor, overlayColor, type ResourceOverlay } from "./colors";
 import { CELL_WATER_CAP, CELL_ENERGY_CAP, SOIL_WATER_CAP } from "../sim/cells";
+import { drawOrganicTree, type PlacedCell } from "./organic";
 import {
   drawSky,
   drawWeather,
@@ -132,6 +133,22 @@ export function drawScene(
           if (rv === surfaceR(q) && overlay === "none")
             drawGrassCap(ctx, sx, sy, r, grass);
         } else {
+          // Roots are drawn as thin limbs now, so the soil they grow through must show.
+          if (rv >= surfaceR(q)) {
+            const soil = terrain.get(q, rv);
+            if (soil)
+              drawFilledHex(
+                ctx,
+                sx,
+                sy,
+                r,
+                cellColor(soil),
+                TERRAIN_STROKE,
+                0.5,
+              );
+            if (rv === surfaceR(q) && overlay === "none")
+              drawGrassCap(ctx, sx, sy, r, grass);
+          }
           treeCells.push({ cell: gameCell, sx, sy });
         }
         continue;
@@ -169,6 +186,7 @@ export function drawScene(
   const swayT = anim !== null ? anim.now * (0.0022 + env.wind * 0.006) : 0;
 
   // ── Pass 2: real game cells ────────────────────────────────────────────────
+  const placed: PlacedCell[] = [];
   for (const { cell, sy, sx: sx0 } of treeCells) {
     const key = hexKey(cell.q, cell.r);
     let sx = sx0;
@@ -188,50 +206,42 @@ export function drawScene(
         if (t < 1) dr = r * popScale(t);
       }
     }
-    if (overlay !== "none" && OVERLAY_LIVING.has(cell.type)) {
-      // Resource view: recolour by fullness; suppress stress/sun glyphs to keep it clean.
-      const level =
-        overlay === "water"
-          ? cell.water / CELL_WATER_CAP
-          : cell.energy / CELL_ENERGY_CAP;
-      drawFilledHex(
-        ctx,
-        sx,
-        sy,
-        dr,
-        overlayColor(level, overlay),
-        "rgba(255,255,255,0.55)",
-        1.5,
-      );
-    } else {
-      drawFilledHex(
-        ctx,
-        sx,
-        sy,
-        dr,
-        cellColor(cell),
-        "rgba(255,255,255,0.55)",
-        1.5,
-      );
-      drawStressTint(ctx, sx, sy, dr, stress.get(key));
-      // Autumn: the canopy turns as fall goes on, before it drops at the season's end.
-      if (cell.type === "leaf" && env.season === "fall") {
-        hexPath(ctx, sx, sy, dr);
-        ctx.fillStyle = `rgba(225,110,30,${0.2 + 0.5 * env.seasonT})`;
+    // In the normal view the tree is drawn as limbs and foliage (render/organic.ts);
+    // the resource views keep flat hexes because there the cell is the data.
+    if (overlay === "none" && OVERLAY_LIVING.has(cell.type)) {
+      placed.push({ cell, key, sx, sy, s: dr / r });
+      continue;
+    }
+    if (overlay === "none" && cell.type === "deadwood") {
+      placed.push({ cell, key, sx, sy, s: dr / r });
+      continue;
+    }
+    // Resource view: recolour living cells by fullness; anything else keeps its colour.
+    const fill = OVERLAY_LIVING.has(cell.type)
+      ? overlayColor(
+          overlay === "water"
+            ? cell.water / CELL_WATER_CAP
+            : cell.energy / CELL_ENERGY_CAP,
+          overlay as "water" | "energy",
+        )
+      : cellColor(cell);
+    drawFilledHex(ctx, sx, sy, dr, fill, "rgba(255,255,255,0.55)", 1.5);
+  }
+  if (placed.length > 0) {
+    drawOrganicTree(ctx, placed, cells, {
+      r,
+      light: leafLight,
+      autumn: env.season === "fall" ? 0.25 + 0.75 * env.seasonT : 0,
+      shimmerNow:
+        anim !== null && anim.shimmer && r >= RECT_HEX_R ? anim.now : null,
+    });
+    for (const p of placed) {
+      const s = stress.get(p.key);
+      if (s !== undefined && s > STRESS_WARN) {
+        ctx.fillStyle = `rgba(230,40,40,${Math.min(0.6, 0.15 + (s - STRESS_WARN) * 0.8)})`;
+        ctx.beginPath();
+        ctx.arc(p.sx, p.sy, r * 0.62, 0, Math.PI * 2);
         ctx.fill();
-      }
-      // Subtle living-canopy shimmer during playback — a gentle per-leaf brightening that
-      // ripples across the canopy so the season animation reads as alive, not static.
-      if (
-        anim !== null &&
-        anim.shimmer &&
-        cell.type === "leaf" &&
-        dr >= RECT_HEX_R
-      ) {
-        drawLeafShimmer(ctx, sx, sy, dr, anim.now, cell.q, cell.r);
-      }
-      if (cell.type === "leaf" && leafLight.has(key)) {
-        drawLeafSun(ctx, sx, sy, dr, leafLight.get(key)!);
       }
     }
   }
@@ -239,19 +249,17 @@ export function drawScene(
   // ── Pass 2b: auto-leaf preview — faint ghost leaves where the canopy will grow ──
   if (leafPreview.size > 0 && overlay === "none") {
     ctx.save();
-    ctx.globalAlpha = 0.6;
+    ctx.globalAlpha = 0.45;
     for (const key of leafPreview) {
       const p = screenPosForKey(key, camera, width, height);
-      if (p)
-        drawFilledHex(
-          ctx,
-          p.sx,
-          p.sy,
-          r,
-          env.season === "fall" ? "#c9893a" : "#5cc060",
-          "rgba(200,255,200,0.7)",
-          1,
-        );
+      if (!p) continue;
+      ctx.fillStyle = env.season === "fall" ? "#c9893a" : "#5cc060";
+      ctx.strokeStyle = "rgba(200,255,200,0.7)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(p.sx, p.sy, r * 0.7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
     }
     ctx.restore();
   }
@@ -567,28 +575,6 @@ function drawLeafSun(
   // disc
   ctx.beginPath();
   ctx.arc(x, y, disc, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-}
-
-// A gentle per-leaf shimmer: a soft light-green wash whose strength rides a sine wave
-// phased by the leaf's (q, r), so brightness ripples across the canopy over time rather
-// than pulsing in unison. Squared so it spends most of the cycle near-invisible and only
-// briefly catches the light. Cheap (one extra fill, only on the lit half of the wave).
-function drawLeafShimmer(
-  ctx: CanvasRenderingContext2D,
-  cx: number,
-  cy: number,
-  r: number,
-  now: number,
-  q: number,
-  rr: number,
-): void {
-  const ph = Math.sin(now * 0.004 + q * 0.9 + rr * 1.7);
-  if (ph <= 0) return;
-  ctx.save();
-  hexPath(ctx, cx, cy, r);
-  ctx.fillStyle = `rgba(205,255,205,${ph * ph * 0.09})`;
   ctx.fill();
   ctx.restore();
 }

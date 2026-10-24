@@ -808,8 +808,45 @@ Cell color encodes health and type at a glance:
 | Soil                             | Tan `#C4A46B`, darkening with moisture                    |
 | Rock                             | Dark gray `#6B6B6B`                                       |
 
-Stress > 0.8: subtle red tint overlay. Inspected cell: white outline.
-Staged cells: 70% opacity + dashed group outline.
+Stress > 0.8: red disc over the wood joint. Inspected cell: white hex outline.
+Staged cells: 70% opacity hexes + dashed group outline (planning stays on the grid).
+
+### The tree drawn as a tree (`render/organic.ts`)
+
+In the normal view living cells are not drawn as hexes. The sim, planning, inspector,
+staging and pruning are all still per-hex; only the look changes. The resource overlays
+(💧/⚡) keep flat hexes, because there the cell is the data.
+
+- **Wood** is a limb between every pair of neighbouring wood-cell centres (a tapered quad)
+  plus a disc at each centre, so a one-wide line reads as a branch and a fused blob reads as
+  a thick trunk. Radius follows the **pipe model** (da Vinci's rule: cross-section carries
+  everything beyond it): `woodRadius = r·min(0.92, 0.34 + 0.09·√n)`, where n is the wood a
+  cell supports along a BFS tree grown from the soil-line row (`treeTopology`, cached per
+  cells-map identity). Roots and branches are separate BFS sides of the soil line; roots
+  are 0.85× thinner. Leaves are not counted, so the trunk keeps its girth when the canopy
+  drops.
+- **Bark** comes in a few shades (`barkColor`: above-ground `#6e4826`, root `#5C3A1A`,
+  reinforced, deadwood, and quantized grey for dying wood). Per-cell water/energy tints
+  were dropped here on purpose: each colour is its own Path2D, and the antialiased seams
+  between many slightly different fills showed as a lattice over thick trunks. Shading is
+  an offset shadow away from the sun, a dark outline, and a lit band on the upper-left edge
+  (bark filled light, then refilled nudged down-right and clipped to the wood).
+- **Path winding matters.** Everything of one colour goes in one Path2D filled with the
+  nonzero rule. `limb()` winds its quad the same way as `arc()`; with the opposite
+  winding, overlapping quads and discs cancel into holes.
+- **Leaves** are three jittered discs each (one, larger, when a hex is under 6 px), pulled a
+  quarter of the way toward the wood they hang from, drawn as one shadow path, per-colour
+  fills, and one highlight path. A leaf darkens with its `computeLight` sun level (quantized
+  to eighths); that replaced the per-leaf ☀ glyphs, and GameCanvas now computes the light
+  during playback too so the canopy's shading doesn't pop between planning and playback.
+  Fall turns each leaf toward one of two autumn colours by `seasonT`.
+- **Flowers** are five-petal blossoms, **fruit** hangs below its twig and grows with
+  `maturity`. Twigs join flowers, fruit and leaves to their thinnest wood neighbour.
+- Underground living cells get their soil hex painted behind them first (the limbs don't
+  cover the hex, and without it the sky showed through around roots).
+- The memorial silhouette uses the same drawing.
+- Cost: on the 10k-cell perf tree in Chrome (M4 Mac), `drawScene` went from ~4.3 ms to
+  ~7.0 ms p50 (p95 ~10 ms) at the fitted zoom; zoomed in it is unchanged (~1.9 ms).
 
 ### Sky, weather and seasons on screen (render-only, `render/sky.ts`)
 
@@ -831,7 +868,7 @@ so the forecast you plan around is something you watch happen. Nothing here touc
   ticks, so wind blows from 2 ticks before to 2 after (`STORM_WIND_PAD`): clouds, near-
   sideways rain, a lightning flash at onset, and a height-proportional canopy sway.
   Planning shows the calm season sky (plus drought haze, which the HUD already states).
-- **Autumn**: leaves get an orange wash that deepens through fall (`seasonT`), ghost leaves
+- **Autumn**: each leaf turns toward orange or red, deepening through fall (`seasonT`); ghost leaves
   are tinted too, and leaves shed in fall fall in autumn colours.
 - The planning-time weather is derived from `g.season`; during playback it must come from
   App, because part 1's commit has already rolled `g.season` forward to the next season.

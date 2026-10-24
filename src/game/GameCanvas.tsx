@@ -468,7 +468,8 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
             vp = EMPTY_VP;
             staged = EMPTY_STAGED;
             leafPreview = EMPTY_PREVIEW;
-            leafLight = EMPTY_LIGHT;
+            // Light still shades the canopy, so self-shaded leaves stay dark mid-season.
+            leafLight = computePlanningLight(g, g.cells);
             stress =
               g.cells.size > 0
                 ? computeStructure(g.cells).stress
