@@ -153,9 +153,9 @@ function mergeStaged(
   return merged;
 }
 
-// Initial camera: frame the tree. A brand-new seed shows the spawn with ground below;
-// a loaded/grown tree is centred on the bounding box of its living cells (so refreshing
-// mid-game no longer leaves the canopy jammed against the top of the screen).
+// Initial camera: frame the tree. A brand-new seed shows the spawn up close; a loaded/
+// grown tree is centred on the bounding box of its living cells here, then re-framed
+// clear of the HUD by fitTree once the canvas size is known (see the resize observer).
 function makeCamera(game: GameState): Camera {
   const cam = createCamera();
   let minX = Infinity,
@@ -174,11 +174,11 @@ function makeCamera(game: GameState): Camera {
   }
   const seedWorldY = hexToPixel(0, surfaceR(0), BASE_RADIUS).y;
   if (n <= 1 || !isFinite(minX)) {
-    // Fresh seed: up close, so the seed and its first growth spots are finger-sized, with
-    // a little more ground than sky in view.
+    // Fresh seed: up close and centred, so the seed and its first growth spots are
+    // finger-sized with room above for the trunk and below for roots.
     cam.zoom = 2;
     cam.x = 0;
-    cam.y = seedWorldY + BASE_RADIUS * 1.5 * 1.5;
+    cam.y = seedWorldY;
     return cam;
   }
   cam.x = (minX + maxX) / 2;
@@ -309,6 +309,7 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
         },
         recenter: () => {
           cameraRef.current = makeCamera(gameRef.current!);
+          glideRef.current = null;
           dirtyRef.current = true;
         },
         setPlaying: (playing: boolean) => {
@@ -658,7 +659,20 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
       if (!canvas) return;
       const obs = new ResizeObserver(([entry]) => {
         const { width, height } = entry.contentRect;
+        const first = cssSizeRef.current.width === 0;
         cssSizeRef.current = { width, height };
+        // A loaded tree is framed in the HUD-free band once the canvas has a size.
+        if (first) {
+          const fit = fitTree(
+            gameRef.current!,
+            cameraRef.current,
+            width,
+            height,
+            true,
+          );
+          if (fit && countLiving(gameRef.current!.cells) > 1)
+            cameraRef.current = fit;
+        }
         canvas.width = Math.round(width * devicePixelRatio);
         canvas.height = Math.round(height * devicePixelRatio);
         const ctx = canvas.getContext("2d")!;
@@ -667,7 +681,7 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
       });
       obs.observe(canvas);
       return () => obs.disconnect();
-    }, []);
+    }, [gameRef]);
 
     // ── Mouse ─────────────────────────────────────────────────────────────────
     // Any camera gesture by the player cancels a glide and holds off follow-growth.
@@ -988,11 +1002,13 @@ function countLiving(cells: Map<string, Cell>): number {
 
 // A camera that shows every living cell clear of the HUD, or null if the current view
 // already does. Only ever zooms out (never in on the player) and recentres on the tree.
+// `force` always frames it, zooming in as far as 2x (the opening view of a loaded tree).
 function fitTree(
   game: GameState,
   cam: Camera,
   width: number,
   height: number,
+  force = false,
 ): Camera | null {
   if (width === 0 || height === 0) return null;
   let minX = Infinity,
@@ -1016,10 +1032,20 @@ function fitTree(
   const viewH = height - HUD_TOP - HUD_BOTTOM;
   const tl = screenToWorld(0, HUD_TOP, cam, width, height);
   const br = screenToWorld(width, HUD_TOP + viewH, cam, width, height);
-  if (minX >= tl.wx && maxX <= br.wx && minY >= tl.wy && maxY <= br.wy)
+  if (
+    !force &&
+    minX >= tl.wx &&
+    maxX <= br.wx &&
+    minY >= tl.wy &&
+    maxY <= br.wy
+  )
     return null;
   const zoom = clampZoom(
-    Math.min(cam.zoom, width / (maxX - minX), viewH / (maxY - minY)),
+    Math.min(
+      force ? 2 : cam.zoom,
+      width / (maxX - minX),
+      viewH / (maxY - minY),
+    ),
   );
   // Centre the tree in the HUD-free band (which sits (HUD_TOP-HUD_BOTTOM)/2 below centre).
   return {

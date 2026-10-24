@@ -349,9 +349,12 @@ export function HUD({
                 disabled={!canAdvance}
                 title={canAdvance ? undefined : "Fix disconnected growth first"}
               >
-                {seasonHalf === 0
-                  ? "Advance to mid-season →"
-                  : "Advance to next season →"}
+                <span className={styles.wideOnly}>
+                  Advance to {seasonHalf === 0 ? "mid-season" : "next season"} →
+                </span>
+                <span className={styles.narrowOnly}>
+                  ▶ {seasonHalf === 0 ? "Mid-season" : "Next season"}
+                </span>
               </button>
             </>
           )}
