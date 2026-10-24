@@ -103,7 +103,7 @@ export function overlayColor(level: number, kind: "water" | "energy"): string {
     : lerpColor("#c79016", "#ffe14a", (t - 0.5) * 2);
 }
 
-function lerpColor(a: string, b: string, t: number): string {
+export function lerpColor(a: string, b: string, t: number): string {
   const [r1, g1, b1] = parseColor(a);
   const [r2, g2, b2] = parseColor(b);
   return `rgb(${lerp(r1, r2, t)},${lerp(g1, g2, t)},${lerp(b1, b2, t)})`;

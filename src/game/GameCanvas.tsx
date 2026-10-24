@@ -22,7 +22,12 @@ import {
 import { cellColor, type ResourceOverlay } from "../render/colors";
 import { computeLight, autoLeafPreview } from "../sim/simulate";
 import { computeStructure } from "../sim/structure";
-import { SEASON_PARAMS } from "../sim/weather";
+import {
+  SEASON_PARAMS,
+  generateWeather,
+  type SeasonWeather,
+} from "../sim/weather";
+import type { SceneEnv } from "../render/sky";
 import { pixelToHex, hexToPixel, hexKey } from "../sim/grid";
 import { surfaceR } from "../sim/terrain";
 import type { Cell } from "../sim/cells";
@@ -51,7 +56,14 @@ export interface GameCanvasHandle {
   triggerShake: () => void;
   recenter: () => void; // re-frame the camera on the current tree (e.g. after New Game)
   setPlaying: (playing: boolean) => void; // toggles playback animations (pop/shimmer/leaf-fall)
+  // The weather being simulated and the tick on screen, so the sky shows the rain and storm
+  // the sim is running. null outside playback (the sky then shows the planned season, calm).
+  setWeather: (weather: SeasonWeather | null, tick: number) => void;
 }
+
+// Storm wind blows for a couple of ticks either side of the 1–2 storm ticks so it reads.
+const STORM_WIND_PAD = 2;
+const FLASH_MS = 350;
 
 // A drifting, fading leaf shed during playback (autumn drop, storm loss). Render-only —
 // world coordinates so it stays pinned to the tree as the camera pans during the fall.
@@ -69,6 +81,7 @@ interface LeafParticle {
   size: number; // world px
 }
 
+const AUTUMN_LEAF = ["#d9822b", "#c8562a", "#e0a23a", "#b5482a"];
 const PARTICLE_GRAVITY = 0.00003; // world px / ms²
 const MAX_PARTICLES = 500; // hard cap so a huge autumn drop can't flood the canvas
 const MAX_SPAWN_PER_DIFF = 200; // and per single frame-to-frame change
@@ -187,6 +200,18 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
       prune: EMPTY_SET,
     });
     const overlayRef = useRef<ResourceOverlay>(overlay);
+    // Sky/weather: the playback weather + tick (from App), plus the eased values on screen.
+    const weatherRef = useRef<{ w: SeasonWeather | null; tick: number }>({
+      w: null,
+      tick: 0,
+    });
+    const envRef = useRef({
+      rain: 0,
+      wind: 0,
+      drought: 0,
+      flashAt: -Infinity,
+      planned: null as { g: GameState; w: SeasonWeather } | null,
+    });
     const pruneModeRef = useRef(pruneMode);
 
     // Cache for the per-frame planning overlays (valid placements, leaf preview, leaf
@@ -266,6 +291,10 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
           // Set synchronously (before the first playback frame draws) so the commit-moment
           // grow-in pop isn't missed by the prop-update race.
           playingRef.current = playing;
+          dirtyRef.current = true;
+        },
+        setWeather: (weather: SeasonWeather | null, tick: number) => {
+          weatherRef.current = { w: weather, tick };
           dirtyRef.current = true;
         },
       }),
@@ -451,7 +480,13 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
                       c.type === "flower" ||
                       c.type === "fruit")
                   ) {
-                    a.particles.push(spawnParticle(c, now));
+                    a.particles.push(
+                      spawnParticle(
+                        c,
+                        now,
+                        weatherRef.current.w?.season === "fall",
+                      ),
+                    );
                     spawned++;
                   }
                 }
@@ -471,6 +506,53 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
               ? { now, bornAt: a.bornAt, shimmer: playingRef.current }
               : null;
 
+          // ── Sky / weather: ease toward what this tick is doing ────────────────
+          const e = envRef.current;
+          let w = weatherRef.current.w;
+          const tick = weatherRef.current.tick;
+          const live = w !== null;
+          if (!w) {
+            // Planning: the season being planned (label = season; weather is pure).
+            if (e.planned?.g !== g)
+              e.planned = {
+                g,
+                w: generateWeather(g.season, g.year, g.worldSeed),
+              };
+            w = e.planned.w;
+          }
+          const storm = w.storm;
+          const windTarget =
+            live &&
+            storm &&
+            tick >= storm.startTick - STORM_WIND_PAD &&
+            tick < storm.startTick + storm.ticks + STORM_WIND_PAD
+              ? 1
+              : 0;
+          if (windTarget === 1 && e.wind < 0.05) e.flashAt = now;
+          const rainTarget = live && w.rain[tick] ? 1 : 0;
+          const droughtTarget = w.isDrought ? 1 : 0;
+          const ease = Math.min(1, dt / 250);
+          e.rain += (rainTarget - e.rain) * ease;
+          e.wind += (windTarget - e.wind) * Math.min(1, dt / 150);
+          e.drought += (droughtTarget - e.drought) * ease;
+          const flash = Math.max(0, 1 - (now - e.flashAt) / FLASH_MS);
+          const env: SceneEnv = {
+            season: w.season,
+            sunAngleDeg: w.sunAngleDeg,
+            intensity: w.intensity,
+            rain: e.rain,
+            wind: e.wind,
+            drought: e.drought,
+            flash,
+            seasonT: live ? tick / w.rain.length : g.seasonHalf * 0.5,
+            now,
+          };
+          const settling =
+            Math.abs(rainTarget - e.rain) > 0.01 ||
+            Math.abs(windTarget - e.wind) > 0.01 ||
+            Math.abs(droughtTarget - e.drought) > 0.01 ||
+            flash > 0;
+
           drawScene(
             ctx,
             width,
@@ -487,6 +569,7 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
             stress,
             overlayRef.current,
             sceneAnim,
+            env,
           );
 
           // Falling leaves, drawn over the scene (drawScene cleared the canvas first).
@@ -495,7 +578,13 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
 
           // Keep redrawing while anything is animating (playback shimmer, active pops,
           // or leaves still falling).
-          if (playingRef.current || now < a.animUntil || a.particles.length > 0)
+          if (
+            playingRef.current ||
+            now < a.animUntil ||
+            a.particles.length > 0 ||
+            settling ||
+            e.rain > 0.02
+          )
             dirtyRef.current = true;
         }
       }
@@ -828,8 +917,9 @@ function touchDist(a: React.Touch, b: React.Touch): number {
 
 // Spawn a falling-leaf particle at a shed cell's world position, with a little randomized
 // drift, spin, and lifetime so a canopy drop scatters naturally rather than dropping in a
-// rigid sheet. Coloured by the cell so a fruit/flower falls in its own hue.
-function spawnParticle(cell: Cell, now: number): LeafParticle {
+// rigid sheet. Coloured by the cell so a fruit/flower falls in its own hue; autumn leaves
+// fall in autumn colours, matching the turned canopy.
+function spawnParticle(cell: Cell, now: number, autumn: boolean): LeafParticle {
   const { x, y } = hexToPixel(cell.q, cell.r, BASE_RADIUS);
   return {
     x,
@@ -841,7 +931,10 @@ function spawnParticle(cell: Cell, now: number): LeafParticle {
     phase: Math.random() * Math.PI * 2,
     born: now,
     life: 1100 + Math.random() * 700,
-    color: cellColor(cell),
+    color:
+      autumn && cell.type === "leaf"
+        ? AUTUMN_LEAF[Math.floor(Math.random() * AUTUMN_LEAF.length)]
+        : cellColor(cell),
     size: BASE_RADIUS * 0.5,
   };
 }

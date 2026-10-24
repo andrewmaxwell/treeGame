@@ -4,9 +4,17 @@ import { surfaceR, type TerrainGen } from "../sim/terrain";
 import { worldToScreen, type Camera } from "./camera";
 import { cellColor, overlayColor, type ResourceOverlay } from "./colors";
 import { CELL_WATER_CAP, CELL_ENERGY_CAP, SOIL_WATER_CAP } from "../sim/cells";
+import {
+  drawSky,
+  drawWeather,
+  grassColor,
+  SKYLINE_STEP,
+  type SceneEnv,
+} from "./sky";
 
 const OVERLAY_LIVING: ReadonlySet<Cell["type"]> = new Set<Cell["type"]>([
   "tree",
+  "reinforced wood",
   "leaf",
   "flower",
   "fruit",
@@ -72,12 +80,13 @@ export function drawScene(
   overlay: ResourceOverlay,
   // Playback animation state (grow-in pop + leaf shimmer), or null for a plain redraw.
   anim: SceneAnim | null,
+  // Season sky, sun and the weather currently being simulated.
+  env: SceneEnv,
 ): void {
-  ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#1a1a2e";
-  ctx.fillRect(0, 0, width, height);
-
   const r = BASE_RADIUS * camera.zoom;
+  const horizonY = (0 - camera.y) * camera.zoom + height / 2; // surfaceR(0) = row 0
+  drawSky(ctx, width, height, horizonY, camera.zoom, env);
+  const grass = grassColor(env);
   const hexW = BASE_RADIUS * Math.sqrt(3);
   const hexRowH = BASE_RADIUS * 1.5;
   const inv = 1 / camera.zoom;
@@ -115,9 +124,11 @@ export function drawScene(
             sy,
             r,
             terrainFill(gameCell, overlay),
-            "rgba(0,0,0,0.3)",
+            TERRAIN_STROKE,
             0.5,
           );
+          if (rv === surfaceR(q) && overlay === "none")
+            drawGrassCap(ctx, sx, sy, r, grass);
         } else {
           treeCells.push({ cell: gameCell, sx, sy });
         }
@@ -129,15 +140,43 @@ export function drawScene(
         sy,
         r,
         terrainFill(cell, overlay),
-        "rgba(0,0,0,0.3)",
+        TERRAIN_STROKE,
         0.5,
       );
+      if (rv === surfaceR(q) && overlay === "none")
+        drawGrassCap(ctx, sx, sy, r, grass);
     }
   }
 
+  // Soil darkens with depth, so the underground reads as depth rather than a flat board.
+  // Drawn before the tree so roots keep their colour; skipped in the resource views.
+  if (overlay === "none" && horizonY < height) {
+    const depthH = BASE_RADIUS * 1.5 * 40 * camera.zoom;
+    const shade = ctx.createLinearGradient(0, horizonY, 0, horizonY + depthH);
+    shade.addColorStop(0, "rgba(20,10,0,0)");
+    shade.addColorStop(1, "rgba(20,10,0,0.5)");
+    ctx.fillStyle = shade;
+    const top = Math.max(0, horizonY - 4 * r);
+    ctx.fillRect(0, top, width, height - top);
+  }
+
+  // Wind sway during playback: above-ground cells shift sideways in proportion to their
+  // height, a breeze normally and a hard lean when a storm blows.
+  const swayAmp = anim !== null ? (0.5 + env.wind * 6) * camera.zoom : 0;
+  const swayLean = anim !== null ? env.wind * 3 * camera.zoom : 0;
+  const swayT = anim !== null ? anim.now * (0.0022 + env.wind * 0.006) : 0;
+
   // ── Pass 2: real game cells ────────────────────────────────────────────────
-  for (const { cell, sx, sy } of treeCells) {
+  for (const { cell, sy, sx: sx0 } of treeCells) {
     const key = hexKey(cell.q, cell.r);
+    let sx = sx0;
+    if (swayAmp > 0) {
+      const h = surfaceR(cell.q) - cell.r;
+      if (h > 0) {
+        const k = Math.pow(h / 10, 1.3);
+        sx += k * (swayAmp * Math.sin(swayT + cell.q * 0.15) + swayLean);
+      }
+    }
     // Grow-in pop: a just-appeared cell scales up from a seed to full size.
     let dr = r;
     if (anim !== null) {
@@ -173,6 +212,12 @@ export function drawScene(
         1.5,
       );
       drawStressTint(ctx, sx, sy, dr, stress.get(key));
+      // Autumn: the canopy turns as fall goes on, before it drops at the season's end.
+      if (cell.type === "leaf" && env.season === "fall") {
+        hexPath(ctx, sx, sy, dr);
+        ctx.fillStyle = `rgba(225,110,30,${0.2 + 0.5 * env.seasonT})`;
+        ctx.fill();
+      }
       // Subtle living-canopy shimmer during playback — a gentle per-leaf brightening that
       // ripples across the canopy so the season animation reads as alive, not static.
       if (
@@ -192,7 +237,7 @@ export function drawScene(
   // ── Pass 2b: auto-leaf preview — faint ghost leaves where the canopy will grow ──
   if (leafPreview.size > 0 && overlay === "none") {
     ctx.save();
-    ctx.globalAlpha = 0.4;
+    ctx.globalAlpha = 0.6;
     for (const key of leafPreview) {
       const p = screenPosForKey(key, camera, width, height);
       if (p)
@@ -201,8 +246,8 @@ export function drawScene(
           p.sx,
           p.sy,
           r,
-          "#4CAF50",
-          "rgba(120,200,120,0.5)",
+          env.season === "fall" ? "#c9893a" : "#5cc060",
+          "rgba(200,255,200,0.7)",
           1,
         );
     }
@@ -335,7 +380,11 @@ export function drawScene(
     }
   }
 
-  // ── Pass 6: altitude ruler ──────────────────────────────────────────────────
+  // ── Pass 6: rain / snow (over the tree, clipped to the sky) + lightning ─────
+  if (env.rain > 0.02 || env.flash > 0.01)
+    drawWeather(ctx, width, height, skyline(width, height, camera), env);
+
+  // ── Pass 7: altitude ruler ──────────────────────────────────────────────────
   drawDepthRuler(ctx, width, height, camera, worldTop, worldBottom);
 }
 
@@ -396,6 +445,48 @@ function drawDepthRuler(
     }
   }
   ctx.restore();
+}
+
+const TERRAIN_STROKE = "rgba(0,0,0,0.18)";
+
+// The top soil row wears the season: green in spring, straw in a drought, snow in winter.
+// Fills the hex's upper half (the three top vertices down to just above centre).
+function drawGrassCap(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  r: number,
+  color: string,
+): void {
+  ctx.fillStyle = color;
+  if (r < RECT_HEX_R) {
+    ctx.fillRect(cx - r * 0.95, cy - r * 0.9, r * 1.9, r * 0.75);
+    return;
+  }
+  const hw = r * HEX_VERT[0][0]; // half-width (cos 30°)
+  ctx.beginPath();
+  ctx.moveTo(cx + hw, cy - r * 0.05);
+  ctx.lineTo(cx + hw, cy - r * 0.5);
+  ctx.lineTo(cx, cy - r);
+  ctx.lineTo(cx - hw, cy - r * 0.5);
+  ctx.lineTo(cx - hw, cy - r * 0.05);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// Screen y of the ground's top edge every SKYLINE_STEP px, for clipping rain to the sky.
+function skyline(width: number, height: number, camera: Camera): Float32Array {
+  const hexW = BASE_RADIUS * Math.sqrt(3);
+  const n = Math.ceil(width / SKYLINE_STEP) + 1;
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const wx = camera.x + (i * SKYLINE_STEP - width / 2) / camera.zoom;
+    let q = Math.round(wx / hexW);
+    q = Math.round(wx / hexW - surfaceR(q) / 2);
+    const wy = BASE_RADIUS * 1.5 * surfaceR(q) - BASE_RADIUS * 0.7;
+    out[i] = Math.min(height, (wy - camera.y) * camera.zoom + height / 2);
+  }
+  return out;
 }
 
 // Soil/rock fill — under the water overlay, soil shows its moisture on the same cyan

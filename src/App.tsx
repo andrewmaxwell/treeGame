@@ -259,6 +259,8 @@ export function App() {
     pauseUntil: number; // performance.now() deadline; playback holds for a beat on a break
     finishing: boolean; // reached the last frame; finish on the NEXT step so the canvas can
     // diff+animate that final transition (e.g. the autumn leaf-drop) while still "playing"
+    weather: SeasonWeather; // the season being simulated, for the sky's rain/storm
+    tick0: number; // season tick of frames[0] (0 or mid-season)
   } | null>(null);
 
   const finishPlayback = useCallback((finalState: GameState) => {
@@ -354,6 +356,7 @@ export function App() {
     setProgress(0);
     setPlayStats(null);
     canvasRef.current?.setPlaying(false); // stop playback animations (pop/shimmer/leaf-fall)
+    canvasRef.current?.setWeather(null, 0); // back to the calm planning sky
     canvasRef.current?.requestDraw();
   }, []);
 
@@ -375,6 +378,7 @@ export function App() {
         pb.lastTime += steps * MS_PER_TICK;
         pb.frameIdx = Math.min(pb.frameIdx + steps, pb.frames.length - 1);
         gameRef.current = pb.frames[pb.frameIdx];
+        canvasRef.current?.setWeather(pb.weather, pb.tick0 + pb.frameIdx);
         canvasRef.current?.requestDraw();
         setProgress(pb.frameIdx / (pb.frames.length - 1));
         setPlayStats(sumResources(gameRef.current.cells));
@@ -413,8 +417,15 @@ export function App() {
   );
 
   const startPlayback = useCallback(
-    (frames: GameState[], storms: StormBreak[]) => {
+    (
+      frames: GameState[],
+      storms: StormBreak[],
+      weather: SeasonWeather,
+      tick0: number,
+    ) => {
       const pb = {
+        weather,
+        tick0,
         frames,
         frameIdx: 0,
         lastTime: performance.now(),
@@ -427,6 +438,7 @@ export function App() {
       playbackRef.current = pb;
       gameRef.current = frames[0];
       canvasRef.current?.setPlaying(true); // enable animations before the first frame draws
+      canvasRef.current?.setWeather(weather, tick0);
       canvasRef.current?.requestDraw();
       setStormFlash(null);
       setIsPlaying(true);
@@ -651,7 +663,12 @@ export function App() {
     };
 
     // 3. Animate
-    startPlayback(frames, storms);
+    startPlayback(
+      frames,
+      storms,
+      weather,
+      part === 0 ? 0 : Math.floor(weather.rain.length / 2), // matches runSeasonPart's split
+    );
   }, [isPlaying, startPlayback]);
 
   const onModeChange = useCallback((m: PlacementMode) => {
@@ -701,6 +718,8 @@ export function App() {
     setStormFlash(null);
     setPruneMode(false);
     setPruneSel(new Set());
+    canvasRef.current?.setPlaying(false);
+    canvasRef.current?.setWeather(null, 0);
     canvasRef.current?.recenter();
     canvasRef.current?.requestDraw();
   }, []);
