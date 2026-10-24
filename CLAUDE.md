@@ -1017,6 +1017,12 @@ not an artificial gate — so the difficulty arc falls out of the tree's size an
   **+1 seed** (`score += 1`, flat — quantity is the game), then drops. Any fruit still
   below 1.0 at fall onset drops unharvested. Summer is the gauntlet; fall opens with the
   reward. The season summary reports the harvest ("🌰 Harvested 4 seeds").
+- On screen, each harvested fruit becomes a 🌰 that swells and arcs up into the HUD's seed
+  counter, which bumps gold as they land (`flySeed` in `game/GameCanvas.tsx`, triggered by
+  the frame diff seeing a ripe fruit vanish; `.scoreBump` in `HUD.module.css`). The seeds
+  are DOM elements, not canvas, because the canvas sits under the HUD bar and a canvas
+  seed vanished behind it for the last third of its flight. App updates the HUD score on
+  every playback frame so the count changes as the seeds arrive, not at playback end.
 
 ### Fruit is heavy (reproduction ↔ structure)
 

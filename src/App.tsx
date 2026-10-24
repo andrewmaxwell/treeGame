@@ -399,6 +399,8 @@ export function App() {
         canvasRef.current?.requestDraw();
         setProgress(pb.frameIdx / (pb.frames.length - 1));
         setPlayStats(sumResources(gameRef.current.cells));
+        // The seed count ticks up on the harvest frame, as the seeds fly to it.
+        setScore(gameRef.current.score);
 
         // Highlight any storm break we just reached: shake, flash, and pause a beat.
         let paused = false;

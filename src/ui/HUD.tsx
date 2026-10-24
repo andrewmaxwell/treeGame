@@ -111,7 +111,12 @@ export function HUD({
               </span>
             </div>
             <div className={styles.rightBlock}>
-              <span className={styles.score}>🌰 {score}</span>
+              <span className={styles.score} data-seed-counter>
+                🌰{" "}
+                <span key={score} className={score > 0 ? styles.scoreBump : ""}>
+                  {score}
+                </span>
+              </span>
               <button
                 className={styles.goalsBtn}
                 onClick={onOpenGoals}

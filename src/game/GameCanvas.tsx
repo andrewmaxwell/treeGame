@@ -30,7 +30,7 @@ import {
 import type { SceneEnv } from "../render/sky";
 import { pixelToHex, hexToPixel, hexKey } from "../sim/grid";
 import { surfaceR } from "../sim/terrain";
-import type { Cell } from "../sim/cells";
+import { FRUIT_RIPE, type Cell } from "../sim/cells";
 import type { GameState } from "./state";
 import {
   getValidPlacements,
@@ -524,10 +524,32 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
               // Deaths of soft tissue → falling-leaf particles (autumn drop / storm loss).
               if (a.prevCellMap) {
                 let spawned = 0;
+                let harvested = 0;
                 for (const k of a.prevKeys) {
                   if (cur.has(k) || spawned >= MAX_SPAWN_PER_DIFF) continue;
                   if (a.particles.length >= MAX_PARTICLES) break;
                   const c = a.prevCellMap.get(k);
+                  // A ripe fruit leaving at fall onset is a harvested seed: it flies
+                  // to the 🌰 counter instead of falling.
+                  if (
+                    c &&
+                    c.type === "fruit" &&
+                    (c.maturity ?? 0) >= FRUIT_RIPE &&
+                    canvasRef.current
+                  ) {
+                    const { x, y } = hexToPixel(c.q, c.r, BASE_RADIUS);
+                    const box = canvasRef.current.getBoundingClientRect();
+                    const { sx, sy } = worldToScreen(
+                      x,
+                      y,
+                      cameraRef.current,
+                      box.width,
+                      box.height,
+                    );
+                    flySeed(box.left + sx, box.top + sy, harvested++ * 110);
+                    spawned++;
+                    continue;
+                  }
                   if (
                     c &&
                     (c.type === "leaf" ||
@@ -1125,4 +1147,48 @@ function drawParticles(
     ctx.fill();
     ctx.restore();
   }
+}
+
+// A harvested seed: a 🌰 that swells out of its fruit, arcs up over the HUD and lands on
+// the seed counter (found by its data-seed-counter attribute). A DOM element rather than
+// canvas so it can fly above the top bar.
+function flySeed(x: number, y: number, delay: number): void {
+  const target = document
+    .querySelector("[data-seed-counter]")
+    ?.getBoundingClientRect();
+  if (!target) return;
+  const tx = target.left + 8;
+  const ty = target.top + target.height / 2;
+  const el = document.createElement("div");
+  el.textContent = "🌰";
+  el.style.cssText =
+    "position:fixed;left:0;top:0;font-size:18px;pointer-events:none;z-index:50;" +
+    "filter:drop-shadow(0 0 6px rgba(255,215,90,0.9));opacity:0";
+  document.body.appendChild(el);
+  const at = (px: number, py: number, s: number, o = 1) => ({
+    transform: `translate(${px - 9}px, ${py - 11}px) scale(${s})`,
+    opacity: o,
+  });
+  // Quadratic arc whose control point sits above both ends, so the seed rises first.
+  const cx = (x + tx) / 2;
+  const cy = Math.min(y, ty) - 90;
+  const frames = [at(x, y, 0.3, 0), at(x, y, 1.4)];
+  for (let i = 1; i <= 8; i++) {
+    const e = i / 8;
+    frames.push(
+      at(
+        (1 - e) * (1 - e) * x + 2 * (1 - e) * e * cx + e * e * tx,
+        (1 - e) * (1 - e) * y + 2 * (1 - e) * e * cy + e * e * ty,
+        1.2 - 0.4 * e,
+      ),
+    );
+  }
+  frames.push(at(tx, ty, 0.6, 0));
+  const anim = el.animate(frames, {
+    duration: 1100,
+    delay,
+    easing: "ease-in-out",
+    fill: "both",
+  });
+  anim.onfinish = anim.oncancel = () => el.remove();
 }

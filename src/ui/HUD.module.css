@@ -106,6 +106,20 @@
   font-size: 16px;
 }
 
+/* The seed count swells as harvested seeds land on it (their flight takes ~1.1 s). */
+.scoreBump {
+  display: inline-block;
+  animation: scoreBump 0.5s ease-out 1s;
+}
+
+@keyframes scoreBump {
+  40% {
+    transform: scale(1.6);
+    color: #ffd75a;
+    text-shadow: 0 0 10px rgba(255, 215, 90, 0.8);
+  }
+}
+
 /* ── Resource-flow overlay toggle ─────────────────────────────────────────── */
 .overlayToggle {
   display: flex;
