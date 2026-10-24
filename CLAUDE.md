@@ -756,7 +756,12 @@ wood, so no toggle is shown.
 - During the first 4 years, if >30% of the energy budget is unspent, show a gentle
   one-line nudge — except before winter, when hoarding is exactly right
 - After playback, show a **season summary**: events that occurred, energy generated,
-  water status, cells lost/gained, goal progress. Tap to dismiss.
+  water status, cells lost/gained, goal progress. Its subtitle says which half just ran
+  ("First half done" / "Season complete"). Only a **notable** half stops the player with
+  the modal: a harvest, fruit lost, fruit set, cells lost, deadwood, a storm, or a
+  milestone (`SeasonSummaryData.notable`, set in `game/summary.ts` plus storm/milestone in
+  `App.finishPlayback`). A quiet half shows the same numbers as a toast under the goal pill
+  that fades after ~4.5 s (`SeasonSummary.tsx`), so a typical year stops 2–4 times, not 8.
 
 ---
 

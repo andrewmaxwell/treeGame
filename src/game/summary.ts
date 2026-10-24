@@ -9,6 +9,10 @@ import { bankedEnergy, isLivingType } from "./planning";
 export interface SeasonSummaryData {
   season: Season;
   year: number;
+  half: 0 | 1; // which half of the season just played
+  // Worth stopping the player for: a harvest, lost fruit or cells, a storm, a milestone.
+  // Quiet halves show as a passing toast instead of a modal.
+  notable: boolean;
   energyStart: number;
   energyEnd: number;
   cellsStart: number;
@@ -131,6 +135,15 @@ export function buildSeasonSummary(
   return {
     season: weather.season,
     year: weather.year,
+    half: final.seasonHalf === 1 ? 0 : 1, // part 0 ends at the mid-season checkpoint
+    notable:
+      seedsHarvested > 0 ||
+      fruitLost > 0 ||
+      cellsLost > 0 ||
+      deadwoodCreated > 0 ||
+      (weather.season === "spring" &&
+        flowerStart > 0 &&
+        final.seasonHalf === 0),
     energyStart,
     energyEnd,
     cellsStart,

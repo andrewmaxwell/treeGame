@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import styles from "./SeasonSummary.module.css";
 import type { SeasonSummaryData } from "../game/summary";
 import type { Season } from "../game/state";
@@ -21,6 +22,37 @@ export function SeasonSummary({ data, onDismiss }: Props) {
   const energyEnd = Math.floor(data.energyEnd);
   const energyDelta = energyEnd - energyStart;
   const energySign = energyDelta >= 0 ? "+" : "−";
+  const subtitle = data.half === 0 ? "First half done" : "Season complete";
+
+  // A quiet half-season passes as a toast so the game doesn't stop eight times a year.
+  const quiet = !data.notable;
+  useEffect(() => {
+    if (!quiet) return;
+    const t = setTimeout(onDismiss, 4500);
+    return () => clearTimeout(t);
+  }, [quiet, onDismiss]);
+  if (quiet) {
+    const cellDelta = data.cellsEnd - data.cellsStart;
+    return (
+      <div className={styles.toast} onClick={onDismiss} role="status">
+        <div className={styles.toastTitle}>
+          {SEASON_LABEL[data.season]}, Year {data.year}
+          <span className={styles.toastSub}> · {subtitle.toLowerCase()}</span>
+        </div>
+        <div className={styles.toastLine}>
+          ⚡ {energyStart} → {energyEnd}{" "}
+          <span className={styles[energyDelta >= 0 ? "good" : "bad"]}>
+            ({energySign}
+            {Math.abs(energyDelta)})
+          </span>
+          {cellDelta > 0 && <> · +{cellDelta} cells</>} · {data.waterStatus}
+        </div>
+        {data.events.length > 0 && (
+          <div className={styles.toastEvents}>{data.events.join(" ")}</div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className={styles.overlay} onClick={onDismiss}>
@@ -28,7 +60,7 @@ export function SeasonSummary({ data, onDismiss }: Props) {
         <div className={styles.title}>
           {SEASON_LABEL[data.season]}, Year {data.year}
         </div>
-        <div className={styles.subtitle}>Season complete</div>
+        <div className={styles.subtitle}>{subtitle}</div>
 
         {data.events.length > 0 && (
           <ul className={styles.events}>

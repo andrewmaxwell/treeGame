@@ -208,6 +208,7 @@ export function App() {
     makeForecast(gameRef.current),
   );
   const [summary, setSummary] = useState<SeasonSummaryData | null>(null);
+  const dismissSummary = useCallback(() => setSummary(null), []);
   const [score, setScore] = useState(() => gameRef.current.score);
   const [goalsView, setGoalsView] = useState<GoalsView>(() =>
     goalsViewOf(gameRef.current),
@@ -338,6 +339,7 @@ export function App() {
         );
       }
       sum.events.push(...newlyCompletedLogs);
+      if (si.weather.storm || newlyCompletedLogs.length > 0) sum.notable = true;
       setSummary(sum);
       summaryInputRef.current = null;
     }
@@ -634,6 +636,7 @@ export function App() {
 
   const onAdvanceSeason = useCallback(() => {
     if (isPlaying) return;
+    setSummary(null); // a quiet-half toast may still be up
     setInspected(null);
     setPruneMode(false);
     setPruneSel(new Set());
@@ -897,9 +900,7 @@ export function App() {
           onClose={() => setGoalLogOpen(false)}
         />
       )}
-      {summary && (
-        <SeasonSummary data={summary} onDismiss={() => setSummary(null)} />
-      )}
+      {summary && <SeasonSummary data={summary} onDismiss={dismissSummary} />}
       {memorial && (
         <Memorial
           record={memorial.record}
