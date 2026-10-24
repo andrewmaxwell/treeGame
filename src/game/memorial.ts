@@ -14,6 +14,7 @@ export interface RunRecord {
   endSeason: Season; // the season it was replanted in
   endYear: number;
   date: string; // YYYY-MM-DD the run ended (local)
+  world?: number; // worldSeed; absent on runs recorded before worlds were shareable
 }
 
 export const HALL_SIZE = 8;
@@ -34,6 +35,7 @@ export function runRecord(game: GameState, date: Date): RunRecord {
     milestones: game.goals.completed.length,
     endSeason: game.season,
     endYear: game.year,
+    world: game.worldSeed,
     date: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`,
   };
 }
@@ -94,4 +96,14 @@ export function saveHall(hall: RunRecord[]): void {
   } catch {
     // A lost record is non-fatal; the memorial still shows.
   }
+}
+
+// A link that opens the same world, for challenging a friend to beat this run.
+export function worldUrl(world: number, base: string): string {
+  return `${base}?world=${world}`;
+}
+
+export function challengeText(r: RunRecord): string {
+  const seeds = `${r.seeds} ${r.seeds === 1 ? "seed" : "seeds"}`;
+  return `My tree raised ${seeds} in World ${r.world}. Can you beat it?`;
 }

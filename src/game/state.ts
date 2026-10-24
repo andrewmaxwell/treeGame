@@ -36,7 +36,15 @@ export interface GameState {
   goals: GoalProgress;
 }
 
-export function createInitialState(): GameState {
+// World numbers are short so a link reads "?world=48213". The world fixes the weather and
+// the sim's random stream, so two players in one world who make the same moves grow the
+// same tree: that is what makes a shared world a fair challenge. (Terrain is the same in
+// every world.)
+export function randomWorld(): number {
+  return 10000 + Math.floor(Math.random() * 90000);
+}
+
+export function createInitialState(worldSeed = randomWorld()): GameState {
   const terrain = new TerrainGen();
   const cells = new Map<string, Cell>();
 
@@ -60,8 +68,8 @@ export function createInitialState(): GameState {
     seasonHalf: 0,
     year: 1,
     score: 0,
-    rngSeed: Math.floor(Math.random() * 0xffffffff),
-    worldSeed: Math.floor(Math.random() * 0xffffffff),
+    rngSeed: Math.imul(worldSeed ^ 0x5bd1e995, 0x9e3779b1) >>> 0,
+    worldSeed,
     goals: { completed: [], peakCells: 1 },
   };
 }

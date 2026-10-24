@@ -15,6 +15,10 @@ Each year cycles through four seasons:
 
 Place cells during the planning phase, then advance the season to watch the simulation play out. The sky shows the season and the weather the simulation is actually running: rain and snow on the exact ticks it falls, storms with wind and lightning, drought haze, and a sun at the angle the light model uses.
 
+The tree is simulated on a hex grid but drawn as a tree: limbs thicken with the wood they carry, and leaves darken where the canopy shades them.
+
+**Challenge a friend:** the address bar always shows your world (`?world=48213`). Anyone who opens that link gets the same weather and the same luck, so the best tree in a world is a fair contest. The memorial screen has a button for it.
+
 Your tree never dies on its own. When you choose **Plant a new seed**, it gets a memorial (its silhouette, seeds, best year, age) and a place in your best runs if it earned one.
 
 ## Tech stack

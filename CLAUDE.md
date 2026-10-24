@@ -1075,6 +1075,16 @@ feeds into that answer.
 - Cells now also carry `maturity` (fruit ripeness) — include it in the serialized cell
   so a fruit's progress survives the summer→fall planning save.
 - One save slot; "Plant a new seed" (New Game) clears it.
+- **Worlds and links.** `createInitialState(world)` takes a world number (new ones are
+  five digits, `randomWorld`) and derives `rngSeed` from it, so the world fixes both the
+  weather and the sim's random stream: same world + same moves = same tree. Terrain is
+  the same in every world. The URL always shows `?world=N` for the tree on screen
+  (`showWorldInUrl` in `App.tsx`, via `history.replaceState`). Opening a link to a
+  different world while a tree is growing shows an invite ("Plant a seed there" / "Keep
+  my tree") instead of discarding the tree; accepting goes through the memorial as usual.
+  With no save the link's world is simply used. The memorial shows the world and a
+  "Challenge a friend" button (Web Share, else clipboard, else the URL as text), and each
+  `RunRecord` stores its `world`. Saves from before this keep their 10-digit world seeds.
 - The hall of best runs lives under its own key (`treegame.memorials.v1`) and survives
   "Plant a new seed" (which clears only the save).
 

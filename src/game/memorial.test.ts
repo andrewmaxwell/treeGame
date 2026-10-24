@@ -6,6 +6,8 @@ import {
   eulogy,
   addToHall,
   HALL_SIZE,
+  worldUrl,
+  challengeText,
   type RunRecord,
 } from "./memorial";
 import { evaluateGoals, type GoalContext } from "./goals";
@@ -106,5 +108,22 @@ describe("evaluateGoals tracks seeds per year", () => {
     expect(p1.yearSeeds).toEqual([0, 0, 4]);
     const p2 = evaluateGoals(p1, { ...base, seedsThisSeason: 0 }).progress;
     expect(p2.yearSeeds).toEqual([0, 0, 4]);
+  });
+});
+
+describe("challenge links", () => {
+  it("names the world and the score to beat", () => {
+    const r = { ...rec(12, 20), world: 48213 };
+    expect(challengeText(r)).toBe(
+      "My tree raised 12 seeds in World 48213. Can you beat it?",
+    );
+    expect(challengeText({ ...r, seeds: 1 })).toContain("1 seed in");
+    expect(worldUrl(48213, "https://x.test/")).toBe(
+      "https://x.test/?world=48213",
+    );
+  });
+
+  it("records the run's world", () => {
+    expect(runRecord(game({ worldSeed: 777 }), new Date()).world).toBe(777);
   });
 });

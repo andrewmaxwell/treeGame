@@ -153,6 +153,15 @@ keep the wall (current), add an artificial low-canopy penalty (hacky), or build 
 
 (Condensed — see `CLAUDE.md` for full implementation notes.)
 
+- **The tree drawn as a tree** — tapered limbs sized by the pipe model, foliage clumps
+  shaded by real light, blossoms and hanging fruit; hexes stay for planning and the
+  resource views. (`render/organic.ts`, CLAUDE.md "The tree drawn as a tree".)
+- **Fewer interruptions** — quiet half-seasons show a fading toast; the modal is kept for
+  harvests, losses, storms and milestones, and says which half just ran.
+- **Harvest moment** — ripe fruit become seeds that fly into the 🌰 counter, which bumps.
+- **Shareable worlds** — `?world=N` links fix weather + sim randomness; memorial has
+  "Challenge a friend"; an invite banner protects a growing tree. Link preview redrawn.
+
 - **Memorial + hall of best runs** — "Plant a new seed" opens a eulogy (silhouette, seeds,
   best year, age, peak size, milestones) and the top-8 runs; replanting records it. Trees
   can't die, so the run ends on replant. (`game/memorial.ts`, `ui/Memorial.tsx`.)

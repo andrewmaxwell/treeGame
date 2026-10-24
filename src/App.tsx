@@ -174,12 +174,41 @@ const STORM_PAUSE_MS = 900;
 // second half's stream is the season seed mixed with this salt.
 const HALF2_RNG_SALT = 0x9e3779b9;
 
+// "?world=48213" in the URL names the world to play (see randomWorld in game/state).
+function worldFromUrl(): number | null {
+  const w = Number(new URLSearchParams(location.search).get("world"));
+  return Number.isInteger(w) && w > 0 && w <= 0xffffffff ? w : null;
+}
+
+// Keep the address bar pointing at the world on screen, so copying it shares the world.
+function showWorldInUrl(world: number): void {
+  try {
+    history.replaceState(
+      null,
+      "",
+      `${location.pathname}?world=${world}${location.hash}`,
+    );
+  } catch {
+    /* sandboxed frames can refuse */
+  }
+}
+
 export function App() {
   // Resume a saved run if one exists, else start fresh. The useState lazy initializer
   // ensures localStorage is read exactly once.
   const [initialGame] = useState<GameState>(
-    () => loadGame() ?? createInitialState(),
+    () => loadGame() ?? createInitialState(worldFromUrl() ?? undefined),
   );
+  // A world link opened while another tree is growing: offer to plant there rather than
+  // throwing the current tree away.
+  const [worldInvite, setWorldInvite] = useState(() => {
+    const w = worldFromUrl();
+    return w !== null && w !== initialGame.worldSeed ? w : null;
+  });
+  const pendingWorldRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (worldInvite === null) showWorldInUrl(gameRef.current.worldSeed);
+  }, [worldInvite]);
 
   // These refs are read by the canvas render loop — no React re-render on change
   const gameRef = useRef<GameState>(initialGame);
@@ -702,7 +731,9 @@ export function App() {
   // Start over with a fresh seed, resetting every bit of run state.
   const resetRun = useCallback(() => {
     clearSave();
-    const fresh = createInitialState();
+    const fresh = createInitialState(pendingWorldRef.current ?? undefined);
+    pendingWorldRef.current = null;
+    showWorldInUrl(fresh.worldSeed);
     gameRef.current = fresh;
     const planning = createPlanningState(bankedEnergy(fresh.cells));
     planningRef.current = planning;
@@ -755,6 +786,23 @@ export function App() {
     setMemorial(null);
     resetRun();
   }, [memorial, resetRun]);
+
+  const onKeepGrowing = useCallback(() => {
+    setMemorial(null);
+    pendingWorldRef.current = null; // declined a world invite after all
+    showWorldInUrl(gameRef.current.worldSeed);
+  }, []);
+
+  const onAcceptWorld = useCallback(() => {
+    pendingWorldRef.current = worldInvite;
+    setWorldInvite(null);
+    onNewGame();
+  }, [worldInvite, onNewGame]);
+
+  const onDeclineWorld = useCallback(() => {
+    setWorldInvite(null);
+    showWorldInUrl(gameRef.current.worldSeed);
+  }, []);
 
   const onHelp = useCallback(() => setShowIntro(true), []);
   const onDismissIntro = useCallback(() => {
@@ -894,6 +942,18 @@ export function App() {
         />
       )}
       {stormFlash && <div className="storm-flash">{stormFlash}</div>}
+      {worldInvite !== null && !showIntro && (
+        <div className="worldInvite" role="dialog">
+          <div>
+            🌍 This link opens <b>World {worldInvite}</b>, where a friend grew a
+            tree. Same weather, same luck: can you raise more seeds?
+          </div>
+          <div className="worldInviteButtons">
+            <button onClick={onAcceptWorld}>Plant a seed there</button>
+            <button onClick={onDeclineWorld}>Keep my tree</button>
+          </div>
+        </div>
+      )}
       {showIntro && <Intro onDismiss={onDismissIntro} />}
       {goalLogOpen && (
         <GoalLog
@@ -910,7 +970,7 @@ export function App() {
           rank={memorial.rank}
           cells={gameRef.current.cells}
           onReplant={onReplant}
-          onKeepGrowing={() => setMemorial(null)}
+          onKeepGrowing={onKeepGrowing}
         />
       )}
     </div>

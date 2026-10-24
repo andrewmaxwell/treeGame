@@ -1,10 +1,16 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import styles from "./Memorial.module.css";
 import type { Cell } from "../sim/cells";
-import { hexToPixel } from "../sim/grid";
+import { hexToPixel, hexKey } from "../sim/grid";
 import { surfaceR } from "../sim/terrain";
-import { cellColor } from "../render/colors";
-import { formatAge, eulogy, type RunRecord } from "../game/memorial";
+import { drawOrganicTree, type PlacedCell } from "../render/organic";
+import {
+  formatAge,
+  eulogy,
+  worldUrl,
+  challengeText,
+  type RunRecord,
+} from "../game/memorial";
 
 interface Props {
   record: RunRecord;
@@ -47,7 +53,11 @@ export function Memorial({
           <Stat label="Age" value={formatAge(record.halfSeasons)} />
           <Stat label="Peak size" value={`${record.peakCells} cells`} />
           <Stat label="Milestones" value={`🏅 ${record.milestones}`} />
+          {record.world !== undefined && (
+            <Stat label="World" value={`🌍 ${record.world}`} />
+          )}
         </div>
+        {record.world !== undefined && <Challenge record={record} />}
 
         <div className={styles.hallTitle}>
           Best runs
@@ -62,6 +72,7 @@ export function Memorial({
               <span className={styles.hallAge}>{formatAge(r.halfSeasons)}</span>
               <span className={styles.hallDate}>
                 {i === rank ? "this tree" : r.date}
+                {r.world !== undefined && r.world < 100000 && ` · W${r.world}`}
               </span>
             </li>
           ))}
@@ -79,6 +90,41 @@ export function Memorial({
           Keep growing this one
         </button>
       </div>
+    </div>
+  );
+}
+
+// Send a friend to this world with the score to beat: the share sheet on phones, the
+// clipboard elsewhere. Says what happened, including when neither is available.
+function Challenge({ record }: { record: RunRecord }) {
+  const [status, setStatus] = useState<string | null>(null);
+  const onClick = async () => {
+    const url = worldUrl(
+      record.world!,
+      `${location.origin}${location.pathname}`,
+    );
+    const text = challengeText(record);
+    if (navigator.share) {
+      try {
+        await navigator.share({ text, url });
+        return;
+      } catch (e) {
+        if ((e as Error).name === "AbortError") return;
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(`${text} ${url}`);
+      setStatus("Link copied. Send it to a friend!");
+    } catch {
+      setStatus(url);
+    }
+  };
+  return (
+    <div className={styles.challenge}>
+      <button className={styles.challengeBtn} onClick={onClick}>
+        🌍 Challenge a friend to this world
+      </button>
+      {status && <div className={styles.challengeStatus}>{status}</div>}
     </div>
   );
 }
@@ -141,23 +187,16 @@ function Silhouette({ cells }: { cells: Map<string, Cell> }) {
     ctx.fillStyle = "#1f160f";
     ctx.fillRect(0, groundY, SIL_W, SIL_H - groundY);
 
-    const r = scale * 1.02;
-    for (const c of tree) {
+    const placed: PlacedCell[] = tree.map((c) => {
       const { x, y } = hexToPixel(c.q, c.r, 1);
-      const sx = toX(x);
-      const sy = toY(y);
-      ctx.beginPath();
-      for (let i = 0; i < 6; i++) {
-        const a = (Math.PI / 3) * i + Math.PI / 6;
-        const px = sx + r * Math.cos(a);
-        const py = sy + r * Math.sin(a);
-        if (i === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
-      }
-      ctx.closePath();
-      ctx.fillStyle = cellColor(c);
-      ctx.fill();
-    }
+      return { cell: c, key: hexKey(c.q, c.r), sx: toX(x), sy: toY(y), s: 1 };
+    });
+    drawOrganicTree(ctx, placed, cells, {
+      r: scale,
+      light: new Map(),
+      autumn: 0,
+      shimmerNow: null,
+    });
   }, [cells]);
   return (
     <canvas
