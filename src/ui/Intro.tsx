@@ -13,31 +13,20 @@ export function Intro({ onDismiss }: Props) {
         <div className={styles.title}>🌱 Grow your tree</div>
         <p className={styles.lead}>
           Raise a tree through the seasons and make as many seeds as you can
-          over its life.
+          over its life. Drag to look around; pinch or scroll to zoom.
         </p>
         <ul className={styles.steps}>
           <li>
-            <b>Tap</b> next to your tree to grow <b>wood</b>: below ground it's
-            roots (water), above ground it's trunk and branches. Drag to pan,
-            scroll/pinch to zoom.
+            <b>Tap a glowing spot</b> to grow wood (it costs ⚡ energy). Roots
+            below ground drink water; branches above reach for the sun.
           </li>
           <li>
-            <b>Leaves grow on their own</b> on the sunniest spots once your
-            branches are tall enough — shown in faint green. Grow up and out to
-            earn a bigger canopy.
+            <b>Leaves sprout on their own</b> once a branch is tall enough, and
+            their energy pays for more growth.
           </li>
           <li>
-            You spend <b>⚡ energy</b> to grow wood. The canopy earns it back in
-            spring and summer (and drops on its own each fall, banking most of
-            its energy).
-          </li>
-          <li>
-            <b>Winter</b> is dormant: your tree lives on reserves. Use it to
-            extend roots and prune.
-          </li>
-          <li>
-            Watch the <b>🎯 goal</b> at the top — it guides you one step at a
-            time.
+            Each year: grow in <b>spring</b>, endure <b>summer</b>, harvest{" "}
+            <b>seeds</b> in fall (your score), rest through <b>winter</b>.
           </li>
         </ul>
         <p className={styles.tip}>

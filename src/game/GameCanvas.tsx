@@ -34,6 +34,7 @@ import type { Cell } from "../sim/cells";
 import type { GameState } from "./state";
 import {
   getValidPlacements,
+  isLivingType,
   type PlanningState,
   type PlacementMode,
 } from "./planning";
@@ -59,7 +60,17 @@ export interface GameCanvasHandle {
   // The weather being simulated and the tick on screen, so the sky shows the rain and storm
   // the sim is running. null outside playback (the sky then shows the planned season, calm).
   setWeather: (weather: SeasonWeather | null, tick: number) => void;
+  // Ease the camera out to keep the whole tree in view, unless the player just moved it.
+  followGrowth: () => void;
 }
+
+// Room the HUD takes at the top and bottom of the screen, so framing keeps the tree clear.
+const HUD_TOP = 110;
+const HUD_BOTTOM = 80;
+const FOLLOW_MS = 700;
+const FOLLOW_IDLE_MS = 3000; // don't yank the camera if the player panned this recently
+// A seedling this small gets its growth spots pulsed, so the first move is obvious.
+const HINT_MAX_CELLS = 4;
 
 // Storm wind blows for a couple of ticks either side of the 1–2 storm ticks so it reads.
 const STORM_WIND_PAD = 2;
@@ -163,9 +174,11 @@ function makeCamera(game: GameState): Camera {
   }
   const seedWorldY = hexToPixel(0, surfaceR(0), BASE_RADIUS).y;
   if (n <= 1 || !isFinite(minX)) {
-    // Fresh seed — keep the spawn high-ish so the soil below it is visible.
+    // Fresh seed: up close, so the seed and its first growth spots are finger-sized, with
+    // a little more ground than sky in view.
+    cam.zoom = 2;
     cam.x = 0;
-    cam.y = seedWorldY + BASE_RADIUS * 1.5 * 5;
+    cam.y = seedWorldY + BASE_RADIUS * 1.5 * 1.5;
     return cam;
   }
   cam.x = (minX + maxX) / 2;
@@ -205,12 +218,23 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
       w: null,
       tick: 0,
     });
+    // Camera glide (follow growth) and when the player last moved the camera themselves.
+    const glideRef = useRef<{
+      from: Camera;
+      to: Camera;
+      t0: number;
+    } | null>(null);
+    const lastInputRef = useRef(0);
     const envRef = useRef({
       rain: 0,
       wind: 0,
       drought: 0,
       flashAt: -Infinity,
-      planned: null as { g: GameState; w: SeasonWeather } | null,
+      planned: null as {
+        g: GameState;
+        w: SeasonWeather;
+        seedling: boolean;
+      } | null,
     });
     const pruneModeRef = useRef(pruneMode);
 
@@ -297,6 +321,23 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
           weatherRef.current = { w: weather, tick };
           dirtyRef.current = true;
         },
+        followGrowth: () => {
+          if (performance.now() - lastInputRef.current < FOLLOW_IDLE_MS) return;
+          const { width, height } = cssSizeRef.current;
+          const to = fitTree(
+            gameRef.current!,
+            cameraRef.current,
+            width,
+            height,
+          );
+          if (!to) return;
+          glideRef.current = {
+            from: { ...cameraRef.current },
+            to,
+            t0: performance.now(),
+          };
+          dirtyRef.current = true;
+        },
       }),
       // eslint-disable-next-line react-hooks/exhaustive-deps
       [],
@@ -372,6 +413,17 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
       function loop(now: number) {
         rafRef.current = requestAnimationFrame(loop);
         const isShaking = now < shakeUntilRef.current;
+        const glide = glideRef.current;
+        if (glide) {
+          const t = Math.min(1, (now - glide.t0) / FOLLOW_MS);
+          const k = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2; // ease in-out
+          const c = cameraRef.current;
+          c.x = glide.from.x + (glide.to.x - glide.from.x) * k;
+          c.y = glide.from.y + (glide.to.y - glide.from.y) * k;
+          c.zoom = glide.from.zoom + (glide.to.zoom - glide.from.zoom) * k;
+          if (t >= 1) glideRef.current = null;
+          dirtyRef.current = true;
+        }
         if (!dirtyRef.current && !isShaking) return;
         dirtyRef.current = false;
 
@@ -517,6 +569,7 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
               e.planned = {
                 g,
                 w: generateWeather(g.season, g.year, g.worldSeed),
+                seedling: countLiving(g.cells) <= HINT_MAX_CELLS,
               };
             w = e.planned.w;
           }
@@ -547,6 +600,10 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
             seasonT: live ? tick / w.rain.length : g.seasonHalf * 0.5,
             now,
           };
+          const hintPulse =
+            !live && e.planned?.seedling && vp.size > 0
+              ? 0.5 + 0.5 * Math.sin(now * 0.005)
+              : 0;
           const settling =
             Math.abs(rainTarget - e.rain) > 0.01 ||
             Math.abs(windTarget - e.wind) > 0.01 ||
@@ -570,6 +627,7 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
             overlayRef.current,
             sceneAnim,
             env,
+            hintPulse,
           );
 
           // Falling leaves, drawn over the scene (drawScene cleared the canvas first).
@@ -583,7 +641,8 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
             now < a.animUntil ||
             a.particles.length > 0 ||
             settling ||
-            e.rain > 0.02
+            e.rain > 0.02 ||
+            hintPulse > 0
           )
             dirtyRef.current = true;
         }
@@ -611,8 +670,15 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
     }, []);
 
     // ── Mouse ─────────────────────────────────────────────────────────────────
+    // Any camera gesture by the player cancels a glide and holds off follow-growth.
+    const markInput = useCallback(() => {
+      lastInputRef.current = performance.now();
+      glideRef.current = null;
+    }, []);
+
     const onMouseDown = useCallback(
       (e: React.MouseEvent) => {
+        markInput();
         if (e.shiftKey) {
           buildDragRef.current.active = true;
           buildDragRef.current.visited.clear();
@@ -628,7 +694,7 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
           moved: false,
         };
       },
-      [buildAtScreenPos],
+      [buildAtScreenPos, markInput],
     );
 
     const onMouseMove = useCallback(
@@ -700,6 +766,8 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
       const canvas = canvasRef.current!;
       function onWheel(e: WheelEvent) {
         e.preventDefault();
+        lastInputRef.current = performance.now();
+        glideRef.current = null;
         const rect = canvas.getBoundingClientRect();
         const sx = e.clientX - rect.left;
         const sy = e.clientY - rect.top;
@@ -730,6 +798,7 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
     // ── Touch ─────────────────────────────────────────────────────────────────
     const onTouchStart = useCallback(
       (e: React.TouchEvent) => {
+        markInput();
         if (e.touches.length === 1) {
           const t = e.touches[0];
           panRef.current = {
@@ -765,7 +834,7 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
           };
         }
       },
-      [buildAtScreenPos, cancelLongPress],
+      [buildAtScreenPos, cancelLongPress, markInput],
     );
 
     const onTouchMove = useCallback(
@@ -910,6 +979,55 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
     );
   },
 );
+
+function countLiving(cells: Map<string, Cell>): number {
+  let n = 0;
+  for (const c of cells.values()) if (isLivingType(c.type)) n++;
+  return n;
+}
+
+// A camera that shows every living cell clear of the HUD, or null if the current view
+// already does. Only ever zooms out (never in on the player) and recentres on the tree.
+function fitTree(
+  game: GameState,
+  cam: Camera,
+  width: number,
+  height: number,
+): Camera | null {
+  if (width === 0 || height === 0) return null;
+  let minX = Infinity,
+    maxX = -Infinity,
+    minY = Infinity,
+    maxY = -Infinity;
+  for (const c of game.cells.values()) {
+    if (!isLivingType(c.type)) continue;
+    const { x, y } = hexToPixel(c.q, c.r, BASE_RADIUS);
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  if (!isFinite(minX)) return null;
+  const pad = BASE_RADIUS * 2;
+  minX -= pad;
+  maxX += pad;
+  minY -= pad;
+  maxY += pad;
+  const viewH = height - HUD_TOP - HUD_BOTTOM;
+  const tl = screenToWorld(0, HUD_TOP, cam, width, height);
+  const br = screenToWorld(width, HUD_TOP + viewH, cam, width, height);
+  if (minX >= tl.wx && maxX <= br.wx && minY >= tl.wy && maxY <= br.wy)
+    return null;
+  const zoom = clampZoom(
+    Math.min(cam.zoom, width / (maxX - minX), viewH / (maxY - minY)),
+  );
+  // Centre the tree in the HUD-free band (which sits (HUD_TOP-HUD_BOTTOM)/2 below centre).
+  return {
+    zoom,
+    x: (minX + maxX) / 2,
+    y: (minY + maxY) / 2 - (HUD_TOP - HUD_BOTTOM) / 2 / zoom,
+  };
+}
 
 function touchDist(a: React.Touch, b: React.Touch): number {
   return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);

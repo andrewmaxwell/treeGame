@@ -357,6 +357,7 @@ export function App() {
     setPlayStats(null);
     canvasRef.current?.setPlaying(false); // stop playback animations (pop/shimmer/leaf-fall)
     canvasRef.current?.setWeather(null, 0); // back to the calm planning sky
+    canvasRef.current?.followGrowth();
     canvasRef.current?.requestDraw();
   }, []);
 

@@ -82,6 +82,8 @@ export function drawScene(
   anim: SceneAnim | null,
   // Season sky, sun and the weather currently being simulated.
   env: SceneEnv,
+  // 0 = off; otherwise 0–1 pulse phase that makes a seedling's growth spots glow.
+  hintPulse: number,
 ): void {
   const r = BASE_RADIUS * camera.zoom;
   const horizonY = (0 - camera.y) * camera.zoom + height / 2; // surfaceR(0) = row 0
@@ -279,6 +281,11 @@ export function drawScene(
           : underground
             ? "rgba(255,212,150,0.7)"
             : "rgba(190,150,100,0.20)";
+      if (hintPulse > 0) {
+        hexPath(ctx, sx, sy, r * (0.86 + 0.06 * hintPulse));
+        ctx.fillStyle = `rgba(255,226,150,${0.12 + 0.22 * hintPulse})`;
+        ctx.fill();
+      }
       hexPath(ctx, sx, sy, r * 0.92);
       ctx.fillStyle =
         vpType === "flower"
@@ -298,10 +305,10 @@ export function drawScene(
     }
   }
 
-  // ── Pass 4: staged cells at 50% opacity ────────────────────────────────────
+  // ── Pass 4: staged cells at 70% opacity (half was grey against the sky) ─────
   if (stagedCells.size > 0) {
     ctx.save();
-    ctx.globalAlpha = 0.5;
+    ctx.globalAlpha = 0.7;
     for (const [, cell] of stagedCells) {
       const { x: wx, y: wy } = hexToPixel(cell.q, cell.r, BASE_RADIUS);
       const { sx, sy } = worldToScreen(wx, wy, camera, width, height);
