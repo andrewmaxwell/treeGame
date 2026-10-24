@@ -2,7 +2,7 @@ import type { Cell } from "../sim/cells";
 import type { GameState, Season } from "./state";
 import type { SeasonWeather } from "../sim/weather";
 import { rainTickCount } from "../sim/weather";
-import { bankedEnergy } from "./planning";
+import { bankedEnergy, isLivingType } from "./planning";
 
 // Everything the post-playback season summary needs, computed by comparing the
 // committed (pre-simulation) state to the final (post-simulation) state.
@@ -20,13 +20,6 @@ export interface SeasonSummaryData {
   waterStatus: string;
   events: string[];
 }
-
-const LIVING: ReadonlySet<Cell["type"]> = new Set<Cell["type"]>([
-  "tree",
-  "leaf",
-  "flower",
-  "fruit",
-]);
 
 function count(cells: Map<string, Cell>, pred: (c: Cell) => boolean): number {
   let n = 0;
@@ -61,8 +54,8 @@ export function buildSeasonSummary(
   const energyStart = bankedEnergy(committed.cells);
   const energyEnd = bankedEnergy(final.cells);
 
-  const cellsStart = count(committed.cells, (c) => LIVING.has(c.type));
-  const cellsEnd = count(final.cells, (c) => LIVING.has(c.type));
+  const cellsStart = count(committed.cells, (c) => isLivingType(c.type));
+  const cellsEnd = count(final.cells, (c) => isLivingType(c.type));
 
   const leavesStart = count(committed.cells, (c) => c.type === "leaf");
   const leavesEnd = count(final.cells, (c) => c.type === "leaf");
@@ -72,8 +65,7 @@ export function buildSeasonSummary(
   const deadEnd = count(final.cells, (c) => c.type === "deadwood");
   const deadwoodCreated = Math.max(0, deadEnd - deadStart);
 
-  // A cell count can both rise (new growth survives) and fall (deaths). We report
-  // the net gain and the explicit losses (deaths + drops) separately.
+  // Net change only: a season that both grows and loses cells reports the difference.
   const cellsGained = Math.max(0, cellsEnd - cellsStart);
   const cellsLost = Math.max(0, cellsStart - cellsEnd);
 

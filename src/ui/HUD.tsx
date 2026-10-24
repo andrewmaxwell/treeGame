@@ -186,7 +186,7 @@ export function HUD({
                   💧 {Math.round(playbackStats.water)}
                 </span>
                 <span title="Total energy held across the tree (rises with photosynthesis, falls with metabolism)">
-                  ⚡ {Math.round(playbackStats.energy)}
+                  ⚡ {Math.floor(playbackStats.energy)}
                 </span>
               </div>
             )}

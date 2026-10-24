@@ -46,7 +46,7 @@ function woodCost(mode: PlacementMode): number {
 // leaves you actually plant, so it's a recovery lifeline, not a free hoard.
 export const SPRING_VIGOR = 3;
 
-function isLivingType(t: CellType): boolean {
+export function isLivingType(t: CellType): boolean {
   return (
     t === "tree" ||
     t === "reinforced wood" ||

@@ -15,7 +15,11 @@ interface Props {
 }
 
 export function SeasonSummary({ data, onDismiss }: Props) {
-  const energyDelta = data.energyEnd - data.energyStart;
+  // Floor both ends the way the HUD's ⚡ budget does, and take the delta from the shown
+  // numbers, so "13 → 21" always reads +8 (rounding the raw delta could show +9 or −0).
+  const energyStart = Math.floor(data.energyStart);
+  const energyEnd = Math.floor(data.energyEnd);
+  const energyDelta = energyEnd - energyStart;
   const energySign = energyDelta >= 0 ? "+" : "−";
 
   return (
@@ -37,8 +41,10 @@ export function SeasonSummary({ data, onDismiss }: Props) {
         <div className={styles.stats}>
           <Stat
             label="Energy"
-            value={`${Math.floor(data.energyStart)} → ${Math.floor(data.energyEnd)}`}
-            detail={`${energySign}${Math.abs(Math.round(energyDelta))}`}
+            value={`${energyStart} → ${energyEnd}`}
+            detail={
+              energyDelta === 0 ? "—" : `${energySign}${Math.abs(energyDelta)}`
+            }
             tone={
               energyDelta > 0 ? "good" : energyDelta < 0 ? "bad" : "neutral"
             }
