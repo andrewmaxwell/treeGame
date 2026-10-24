@@ -95,6 +95,7 @@ interface LeafParticle {
 const AUTUMN_LEAF = ["#d9822b", "#c8562a", "#e0a23a", "#b5482a"];
 const PARTICLE_GRAVITY = 0.00003; // world px / ms²
 const MAX_PARTICLES = 500; // hard cap so a huge autumn drop can't flood the canvas
+const TOUCH_MOUSE_GHOST_MS = 800; // emulated mouse events trail a touch by up to ~300 ms
 const MAX_SPAWN_PER_DIFF = 200; // and per single frame-to-frame change
 
 interface GameCanvasProps {
@@ -713,8 +714,15 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
       glideRef.current = null;
     }, []);
 
+    // After a touch, browsers replay it as mousedown/mouseup/click. Those must not count
+    // as a second tap, which would unstage the cell the touch just staged.
+    const lastTouchRef = useRef(-Infinity);
+    const isEmulatedMouse = () =>
+      performance.now() - lastTouchRef.current < TOUCH_MOUSE_GHOST_MS;
+
     const onMouseDown = useCallback(
       (e: React.MouseEvent) => {
+        if (isEmulatedMouse()) return;
         markInput();
         if (e.shiftKey) {
           buildDragRef.current.active = true;
@@ -762,6 +770,7 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
 
     const onMouseUp = useCallback(
       (e: React.MouseEvent) => {
+        if (isEmulatedMouse()) return;
         if (buildDragRef.current.active) {
           buildDragRef.current.active = false;
           buildDragRef.current.visited.clear();
@@ -835,6 +844,7 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
     // ── Touch ─────────────────────────────────────────────────────────────────
     const onTouchStart = useCallback(
       (e: React.TouchEvent) => {
+        lastTouchRef.current = performance.now();
         markInput();
         if (e.touches.length === 1) {
           const t = e.touches[0];
@@ -936,6 +946,7 @@ export const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(
 
     const onTouchEnd = useCallback(
       (e: React.TouchEvent) => {
+        lastTouchRef.current = performance.now();
         cancelLongPress();
         // End any active build-drag. If a finger remains, resume panning with it;
         // a build gesture is never treated as a tap.

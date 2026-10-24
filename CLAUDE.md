@@ -1123,6 +1123,10 @@ feeds into that answer.
 
 ## Known UX gaps (backlog — from playtest feedback, not yet built)
 
+- **Touch taps count once.** After a touch, browsers replay it as mousedown/mouseup/click;
+  the mouse handler took that as a second tap and unstaged the cell the touch had just
+  staged (seen in Chrome's phone emulation: a tap did nothing). Mouse events within
+  `TOUCH_MOUSE_GHOST_MS` (800 ms) of a touch are ignored.
 - **Drag-to-stage — desktop and mobile built.** Holding **Shift** and dragging the mouse
   stages every valid cell the cursor passes over in one gesture (`buildDragRef` in
   `game/GameCanvas.tsx`, shares the tap-to-stage validity rules via a `visited` set). This
