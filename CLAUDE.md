@@ -896,15 +896,27 @@ to beat next run.
     ... keep generating; milestones never run out
     (The former "recover from rot" milestone is shelved with rot — see Decisions Deferred.)
 
-### Death and the Memorial (DEFERRED — see Decisions Deferred)
+### The Memorial (✅ built, on replant) and the hall of best runs
 
-The intended design: when the last living cell dies, the run ends with a **Memorial
-screen** — the tree's final silhouette, its age in years, peak size, lifetime seeds,
-milestones earned, and its cause of death in plain words ("Died in the drought of Year
-12, age 11, having raised 17 seeds"). One button: "Plant a new seed." Death is an ending,
-not a failure state — a eulogy, not a game-over screen. **Deferred for now** along with
-the hall of memorials; until built, a dead tree is simply restarted via "Plant a new
-seed" (the existing New Game flow).
+**A tree can't die.** Wood health floors at 0.5 (reinforced 0.25), storms only snap
+above-ground wood, and pruning refuses to remove the whole tree, so the roots and seed
+always live (a harness check of 8 world seeds × idle / tall-thin play over 25 years never
+dropped below 1 living cell). The originally designed death-triggered memorial would
+never appear, so the run ends when the player chooses **"Plant a new seed"** (⟳). Andrew
+chose this over a fixed lifespan (Oct 2026): no sim change.
+
+- ⟳ opens the **Memorial** (`ui/Memorial.tsx`, `game/memorial.ts`) instead of a confirm:
+  the tree's silhouette, a one-line eulogy ("It stood 4 years and grew to 56 cells,
+  raising 8 seeds. Replanted in spring of Year 5."), lifetime seeds, best year, age, peak
+  size, milestones, and the **hall of best runs** with this tree's would-be place
+  highlighted. "Plant a new seed" records it and resets; "Keep growing this one" cancels.
+- A seed replanted before any half-season ran is reset directly (nothing to remember).
+  Pressed mid-playback, the playback finishes first so the record reflects the season.
+- Hall: top `HALL_SIZE` (8) runs by seeds, then longer life, in localStorage
+  `treegame.memorials.v1`. Age is shown in whole seasons lived.
+- Best year comes from `goals.yearSeeds` (seeds per year, index year − 1), which
+  `evaluateGoals` accumulates from `seedsThisSeason`. It's optional so older saves load;
+  for them the memorial says "not tracked (older save)" until a harvest is recorded.
 
 ---
 
@@ -1015,8 +1027,8 @@ feeds into that answer.
 - Cells now also carry `maturity` (fruit ripeness) — include it in the serialized cell
   so a fruit's progress survives the summer→fall planning save.
 - One save slot; "Plant a new seed" (New Game) clears it.
-- A persistent "hall of memorials" record (best score, longest life) across runs is
-  **deferred** with the Memorial — see Decisions Deferred.
+- The hall of best runs lives under its own key (`treegame.memorials.v1`) and survives
+  "Plant a new seed" (which clears only the save).
 
 **M7 implementation notes**
 
@@ -1199,10 +1211,8 @@ and `'ground water'` treated as terrain in the inspector). When adding a cell ty
   scaffolding — leave them in, just don't drive them yet.
 - **Leaf pests** (a patch of leaves loses photosynthesis efficiency and spreads
   leaf-to-leaf; counterplay is shedding affected leaves) — was slated for Year 6.
-- **Memorial screen** — the end-of-run eulogy (final silhouette, age, peak size, lifetime
-  seeds, milestones, plain-language cause of death). Until built, death just restarts via
-  "Plant a new seed."
-- **Hall of memorials** — the cross-run best-score / longest-life record.
+- **A death rule.** Trees are immortal (see "The Memorial"). If one is ever added, the
+  memorial can also open on death with a plain-language cause.
 - **Rock destruction.** Let the player spend energy (suggested: 20 per rock cell) during
   the planning phase to remove a rock cell, opening that hex for root growth. Gives agency
   when the random rock layout blocks a critical path. Cost is deliberately steep so it's a
@@ -1447,9 +1457,9 @@ A pass of playtest-driven UX/balance work (brother's second playthrough):
 (Was Milestone 9; moved to Decisions Deferred.) Infection sites, spread, free pruning of
 dead/dying cells, deadwood crumbling.
 
-### Deferred — Memorial
+### Memorial ✅ built (Oct 2026)
 
-(Was part of Milestone 10.) Memorial screen + hall of memorials. See Decisions Deferred.
+Memorial on replant + hall of best runs. See "The Memorial".
 
 ---
 

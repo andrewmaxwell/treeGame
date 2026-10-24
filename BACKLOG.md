@@ -87,18 +87,6 @@ keep the wall (current), add an artificial low-canopy penalty (hacky), or build 
     Corner overview with viewport rectangle once the tree exceeds ~1.5× viewport.
     Specified, not built. Only matters once trees get large.
 
-11. **Memorial screen** — _Value: Med · Effort: Med_
-    Designed but deferred: end-of-run eulogy (final silhouette, age, peak size,
-    lifetime seeds, milestones, plain-language cause of death). Death as an ending,
-    not a game-over. **Blocker (Oct 2026): a tree can't die.** Wood health floors at 0.5
-    (reinforced 0.25), storms only snap above-ground wood, and pruning refuses to remove
-    the whole tree, so the roots and seed always live. A harness check (8 world seeds ×
-    idle / tall-thin, 25 years each) never dropped below 1 living cell. A memorial needs
-    either a death rule or a run that ends some other way (e.g. a fixed-length run).
-
-12. **Hall of memorials** — _Value: Low · Effort: Med_
-    Cross-run best-score / longest-life record. Depends on #11.
-
 ---
 
 ## Deferred features (bigger, design exists)
@@ -165,6 +153,9 @@ keep the wall (current), add an artificial low-canopy penalty (hacky), or build 
 
 (Condensed — see `CLAUDE.md` for full implementation notes.)
 
+- **Memorial + hall of best runs** — "Plant a new seed" opens a eulogy (silhouette, seeds,
+  best year, age, peak size, milestones) and the top-8 runs; replanting records it. Trees
+  can't die, so the run ends on replant. (`game/memorial.ts`, `ui/Memorial.tsx`.)
 - **Visible seasons & weather** — season sky, a sun on the light model's true angle, rain/
   snow on the exact rain ticks, storm wind/lightning/sway, drought haze, autumn leaf colour,
   seasonal grass and depth-shaded soil. (`render/sky.ts`, `render/renderer.ts`.)

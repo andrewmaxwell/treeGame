@@ -234,5 +234,15 @@ export function evaluateGoals(
   }
 
   const peakCells = Math.max(progress.peakCells, ctx.livingCells);
-  return { progress: { completed, peakCells }, newlyCompleted };
+  let yearSeeds = progress.yearSeeds;
+  if (ctx.seedsThisSeason > 0) {
+    yearSeeds = [...(yearSeeds ?? [])];
+    const i = ctx.yearSimulated - 1;
+    while (yearSeeds.length <= i) yearSeeds.push(0);
+    yearSeeds[i] += ctx.seedsThisSeason;
+  }
+  return {
+    progress: { ...progress, completed, peakCells, yearSeeds },
+    newlyCompleted,
+  };
 }

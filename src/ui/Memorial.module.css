@@ -1,0 +1,166 @@
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(3px);
+  pointer-events: auto;
+  z-index: 30;
+  font-family: system-ui, sans-serif;
+  padding: max(12px, env(safe-area-inset-top)) 12px
+    max(12px, env(safe-area-inset-bottom));
+}
+
+.card {
+  width: min(380px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  background: #20232e;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 20px 22px;
+  color: #fff;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.silhouette {
+  display: block;
+  max-width: 100%;
+  margin: 0 auto 14px;
+  border-radius: 8px;
+}
+
+.title {
+  font-size: 21px;
+  font-weight: 700;
+}
+
+.eulogy {
+  margin: 6px 0 14px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.stats {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 8px;
+  margin-bottom: 14px;
+}
+
+.statRow {
+  display: flex;
+  align-items: baseline;
+  padding: 4px 0;
+  font-size: 14px;
+}
+
+.statLabel {
+  flex: 1;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.statValue {
+  font-weight: 600;
+}
+
+.hallTitle {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+  margin-bottom: 6px;
+}
+
+.newBest {
+  color: #ffd24a;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.hall {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  counter-reset: hall;
+}
+
+.hall li {
+  counter-increment: hall;
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.hall li::before {
+  content: counter(hall) ".";
+  width: 18px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.hall li.thisRun {
+  background: rgba(255, 210, 74, 0.14);
+  color: #fff;
+}
+
+.hallSeeds {
+  min-width: 56px;
+  font-weight: 700;
+}
+
+.hallAge {
+  flex: 1;
+}
+
+.hallDate {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.missed {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.replant,
+.keep {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px;
+  font-size: 15px;
+  font-weight: 700;
+  font-family: system-ui, sans-serif;
+  border-radius: 8px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.replant {
+  margin-top: 6px;
+  background: #2d7a3a;
+  color: #fff;
+  border: none;
+}
+.replant:hover {
+  background: #3a9f4c;
+}
+
+.keep {
+  margin-top: 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  font-weight: 600;
+}
+.keep:hover {
+  background: rgba(255, 255, 255, 0.08);
+}

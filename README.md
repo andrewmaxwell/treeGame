@@ -15,6 +15,8 @@ Each year cycles through four seasons:
 
 Place cells during the planning phase, then advance the season to watch the simulation play out. The sky shows the season and the weather the simulation is actually running: rain and snow on the exact ticks it falls, storms with wind and lightning, drought haze, and a sun at the angle the light model uses.
 
+Your tree never dies on its own. When you choose **Plant a new seed**, it gets a memorial (its silhouette, seeds, best year, age) and a place in your best runs if it earned one.
+
 ## Tech stack
 
 - TypeScript (strict) + React (HUD only)

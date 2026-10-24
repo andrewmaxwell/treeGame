@@ -43,6 +43,15 @@ import {
 } from "./game/prune";
 import { loadGame, saveGame, clearSave } from "./game/save";
 import { Intro } from "./ui/Intro";
+import { Memorial } from "./ui/Memorial";
+import {
+  runRecord,
+  worthRemembering,
+  addToHall,
+  loadHall,
+  saveHall,
+  type RunRecord,
+} from "./game/memorial";
 import {
   generateWeather,
   weatherHeadline,
@@ -214,6 +223,11 @@ export function App() {
   // Bulk "speed prune": a selection of cells to remove in one confirm (playtest request).
   const [pruneMode, setPruneMode] = useState(false);
   const [pruneSel, setPruneSel] = useState<Set<string>>(() => new Set());
+  const [memorial, setMemorial] = useState<{
+    record: RunRecord;
+    hall: RunRecord[];
+    rank: number | null;
+  } | null>(null);
   const [showIntro, setShowIntro] = useState(() => {
     try {
       return localStorage.getItem("treegame.introSeen") == null;
@@ -680,18 +694,8 @@ export function App() {
 
   // Plant a new seed: clear the save and reset every bit of run state. Guarded by a
   // confirm because it discards the current tree.
-  const onNewGame = useCallback(() => {
-    if (
-      !window.confirm(
-        "Plant a new seed? This ends your current tree and starts over.",
-      )
-    )
-      return;
-    // Stop any in-flight playback.
-    const pb = playbackRef.current;
-    if (pb) cancelAnimationFrame(pb.rafId);
-    playbackRef.current = null;
-
+  // Start over with a fresh seed, resetting every bit of run state.
+  const resetRun = useCallback(() => {
     clearSave();
     const fresh = createInitialState();
     gameRef.current = fresh;
@@ -724,6 +728,28 @@ export function App() {
     canvasRef.current?.recenter();
     canvasRef.current?.requestDraw();
   }, []);
+
+  // "Plant a new seed": a tree that lived at least half a season gets a memorial first
+  // (with the hall of best runs it would join); replanting there records it. A seed
+  // that never ran is simply replanted. A playback in progress is finished first so the
+  // memorial shows the season's real outcome.
+  const onNewGame = useCallback(() => {
+    const pb = playbackRef.current;
+    if (pb) finishPlayback(pb.frames[pb.frames.length - 1]);
+    const game = gameRef.current;
+    if (!worthRemembering(game)) {
+      resetRun();
+      return;
+    }
+    const record = runRecord(game, new Date());
+    setMemorial({ record, ...addToHall(loadHall(), record) });
+  }, [finishPlayback, resetRun]);
+
+  const onReplant = useCallback(() => {
+    if (memorial) saveHall(memorial.hall);
+    setMemorial(null);
+    resetRun();
+  }, [memorial, resetRun]);
 
   const onHelp = useCallback(() => setShowIntro(true), []);
   const onDismissIntro = useCallback(() => {
@@ -873,6 +899,16 @@ export function App() {
       )}
       {summary && (
         <SeasonSummary data={summary} onDismiss={() => setSummary(null)} />
+      )}
+      {memorial && (
+        <Memorial
+          record={memorial.record}
+          hall={memorial.hall}
+          rank={memorial.rank}
+          cells={gameRef.current.cells}
+          onReplant={onReplant}
+          onKeepGrowing={() => setMemorial(null)}
+        />
       )}
     </div>
   );

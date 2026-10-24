@@ -11,6 +11,9 @@ export type Season = "spring" | "summer" | "fall" | "winter";
 export interface GoalProgress {
   completed: string[];
   peakCells: number;
+  // Seeds harvested in each year (index = year − 1), for the memorial's "best year".
+  // Optional so saves from before it load (they simply start counting from now).
+  yearSeeds?: number[];
 }
 
 export interface GameState {
