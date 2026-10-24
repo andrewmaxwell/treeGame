@@ -13,7 +13,7 @@ Each year cycles through four seasons:
 - **Fall** — harvest seeds (your score); the canopy drops on its own, banking energy before frost
 - **Winter** — survive on reserves; ideal time to prune and reshape
 
-Place cells during the planning phase, then advance the season to watch the simulation play out.
+Place cells during the planning phase, then advance the season to watch the simulation play out. The sky shows the season and the weather the simulation is actually running: rain and snow on the exact ticks it falls, storms with wind and lightning, drought haze, and a sun at the angle the light model uses.
 
 ## Tech stack
 

@@ -686,7 +686,7 @@ kill and winter-growth (age-0) frost death are implemented.
   (it grows up through the canopy, replacing that leaf).
 - In rock: rejected with a brief shake/feedback
 - Leaves, flowers, and fruit are terminal: nothing can attach to them
-- Staged cells render at 50% opacity with a **dashed white outline drawn around the
+- Staged cells render at 70% opacity (50% read as grey against the sky) with a **dashed white outline drawn around the
   perimeter of each contiguous staged group** (no dividers between adjacent staged cells)
 - Tap a staged cell to unstage it (energy refunded immediately). If that disconnects
   other staged cells from the tree, they unstage automatically with refunds.
@@ -809,7 +809,32 @@ Cell color encodes health and type at a glance:
 | Rock                             | Dark gray `#6B6B6B`                                       |
 
 Stress > 0.8: subtle red tint overlay. Inspected cell: white outline.
-Staged cells: 50% opacity + dashed group outline.
+Staged cells: 70% opacity + dashed group outline.
+
+### Sky, weather and seasons on screen (render-only, `render/sky.ts`)
+
+The world around the tree shows the season and the weather the sim is actually running,
+so the forecast you plan around is something you watch happen. Nothing here touches the sim.
+
+- **Sky** gradient per season (spring blue, summer bright, fall amber horizon, winter grey),
+  anchored to the world (spans 700 world px above row 0) so it scrolls with the camera.
+  Drought adds a hot haze; rain and storms pull it toward overcast grey.
+- **Top soil row** (r === surfaceR(q)) wears the season: green, olive, ochre, snow; straw
+  in a drought. Soil darkens with depth (a gradient drawn after terrain, before the tree).
+- **Sun** placed up-left along the light model's real ray direction. computeLight shifts a
+  ray's column by (rows down)·tanθ, and a column is √3·R wide vs a 1.5·R row, so the
+  on-screen slope is tanθ·2/√3. Checked against computeLight's shadows (40°: predicted
+  0.969, measured 0.962). Faint shafts at the same angle; dimmed by cloud; smaller in winter.
+- **Playback weather**: App passes the SeasonWeather and the season tick of each frame to
+  `GameCanvas.setWeather` (tick = frameIdx, + mid for part 1). Rain shows exactly on
+  `weather.rain[tick]` ticks (snow in winter), eased over ~250 ms. A storm is only 1–2
+  ticks, so wind blows from 2 ticks before to 2 after (`STORM_WIND_PAD`): clouds, near-
+  sideways rain, a lightning flash at onset, and a height-proportional canopy sway.
+  Planning shows the calm season sky (plus drought haze, which the HUD already states).
+- **Autumn**: leaves get an orange wash that deepens through fall (`seasonT`), ghost leaves
+  are tinted too, and leaves shed in fall fall in autumn colours.
+- The planning-time weather is derived from `g.season`; during playback it must come from
+  App, because part 1's commit has already rolled `g.season` forward to the next season.
 
 ---
 
@@ -1092,10 +1117,12 @@ feeds into that answer.
     redraws at full rAF (not just per tick) for smooth shimmer/pops. **Still wanted:** the
     water/energy **pulse up the trunk** (deferred — the fiddliest of the four; a moving
     height-banded highlight or true flow viz).
-- **Camera doesn't follow growth.** CLAUDE.md specifies a gentle drift to keep new
-  growth in frame unless the player has manually panned recently; not implemented. The
-  initial camera now fits the loaded tree's bounding box (`makeCamera` in `GameCanvas`),
-  but it does not re-frame as the tree grows during a run.
+- **Camera follows growth — built.** After each playback `GameCanvas.followGrowth()` glides
+  (700 ms ease) to frame every living cell inside the HUD-free band (`HUD_TOP` 110 px,
+  `HUD_BOTTOM` 80 px). It only zooms out, never in, and skips if the player panned or
+  zoomed in the last 3 s. A loaded tree is framed the same way (zooming in up to 2x) on
+  the canvas's first resize. A brand-new seed opens at 2x zoom, centred, and while the
+  tree has ≤ 4 living cells its valid spots pulse so the first move is obvious.
 - **Minimap** (corner overview once the tree exceeds ~1.5× viewport) — specified, not built.
 
 ## Shipped cell types (formerly `0.0.2` "Quality of Life" scaffolding)

@@ -56,25 +56,20 @@ keep the wall (current), add an artificial low-canopy penalty (hacky), or build 
    makes early-spring planting the intended gamble.
    Touches: `sim/simulate.ts`, `sim/weather.ts`.
 
-5. **Camera follows growth** — _Value: Med · Effort: Med_
-   `CLAUDE.md` specifies a gentle drift to keep new growth in frame unless the player
-   panned recently; not implemented (initial fit only).
-   Touches: `render/camera.ts`, `game/GameCanvas.tsx`.
-
-6. **Replacement clarity** — _Value: Med · Effort: Med_
+5. **Replacement clarity** — _Value: Med · Effort: Med_
    Staging wood over an existing leaf is supported but just renders the staged cell at
    50% opacity over the old one — no signal a _swap_ is happening. Add a distinct
    "replacing" visual (ghost/strike the replaced cell, or a swap icon).
    Touches: `render/renderer.ts`.
 
-7. **Milestone rewards** — _Value: Med · Effort: Med_
+6. **Milestone rewards** — _Value: Med · Effort: Med_
    Currently milestones are pure achievements. Add a tangible reward on completion —
    a one-time energy grant, a permanent upkeep discount, or a new cell type unlock.
    The flower unlock on "Reach 30 cells" is the existing precedent. Design the reward
    to feel like the milestone pays off, not like something to min-max.
    Touches: `game/goals.ts`, HUD, possibly `sim/cells.ts` for new types.
 
-8. **Reinforced wood polish** _(follow-up to the shipped feature)_ — _Value: Low · Effort: Low_
+7. **Reinforced wood polish** _(follow-up to the shipped feature)_ — _Value: Low · Effort: Low_
    Tune the 2⚡ cost / 30-cell unlock gate against the harness, and give reinforced wood a
    distinct placement-hint colour so its staged spots read differently from normal wood.
    Touches: `game/planning.ts`, `render/renderer.ts`.
@@ -95,7 +90,11 @@ keep the wall (current), add an artificial low-canopy penalty (hacky), or build 
 11. **Memorial screen** — _Value: Med · Effort: Med_
     Designed but deferred: end-of-run eulogy (final silhouette, age, peak size,
     lifetime seeds, milestones, plain-language cause of death). Death as an ending,
-    not a game-over.
+    not a game-over. **Blocker (Oct 2026): a tree can't die.** Wood health floors at 0.5
+    (reinforced 0.25), storms only snap above-ground wood, and pruning refuses to remove
+    the whole tree, so the roots and seed always live. A harness check (8 world seeds ×
+    idle / tall-thin, 25 years each) never dropped below 1 living cell. A memorial needs
+    either a death rule or a run that ends some other way (e.g. a fixed-length run).
 
 12. **Hall of memorials** — _Value: Low · Effort: Med_
     Cross-run best-score / longest-life record. Depends on #11.
@@ -165,6 +164,14 @@ keep the wall (current), add an artificial low-canopy penalty (hacky), or build 
 ## Done
 
 (Condensed — see `CLAUDE.md` for full implementation notes.)
+
+- **Visible seasons & weather** — season sky, a sun on the light model's true angle, rain/
+  snow on the exact rain ticks, storm wind/lightning/sway, drought haze, autumn leaf colour,
+  seasonal grass and depth-shaded soil. (`render/sky.ts`, `render/renderer.ts`.)
+- **Camera follows growth + opening view** — glide-to-fit after each playback, framed
+  reloads, a close-up centred seed with pulsing first spots, a three-point intro.
+- **Phone layout + link preview** — two-row bottom bar under 560 px, safe areas, Open
+  Graph image (`public/og.jpg`).
 
 - **Ground water** — very rare deep infinite-supply pockets (depth ≥ 25, a fraction of a
   percent even deep — a true "jackpot"), with the deep water-table regen restored as the
